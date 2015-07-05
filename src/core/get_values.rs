@@ -54,28 +54,23 @@ impl ValueIter {
 }
 
 struct ParentStateIter<'a> {
-    started: bool,
-    state: &'a State,
+    state: Option<&'a State>,
 }
 
 impl<'a> ParentStateIter<'a> {
     fn new(state: &'a State) -> ParentStateIter {
-        ParentStateIter { started: false, state: state }
+        ParentStateIter { state: Some(state) }
     }
 }
 
 impl<'a> Iterator for ParentStateIter<'a> {
     type Item = &'a State;
     fn next(&mut self) -> Option<&'a State> {
-        if !self.started {
-            self.started = true;
-            return Some(self.state);
-        }
-        let next: Option<&'a State> = self.state.parent.as_ref().map(|x| &**x);
-        if let Some(x) = next {
-            self.state = x
-        }
-        next
+        let result = self.state;
+        self.state = self.state.and_then(|s| {
+            s.parent.as_ref().map(|x| &**x)
+        });
+        result
     }
 }
 
