@@ -156,7 +156,7 @@ fn assign_values_inner(state: State, mut counted: BTreeSet<CountedVar>, mut vars
         //println!("iterating over {:?} with value {:?}", var.0, state.follow_ref(var.0).1.opt().unwrap());
         let mut counted = counted.clone();
         let mut vars = vars.clone();
-        for &(key, ref val) in state.eqs.eqs.iter() {
+        for &(key, ref val) in state.eqs.iter() {
             let var_entry = vars.entry(key);
             match val {
                 &Exactly(Value(ref val), _) => {

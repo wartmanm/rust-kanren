@@ -737,6 +737,7 @@ impl VarMap {
     fn clear(&mut self) {
         self.eqs.clear();
     }
+    fn is_empty(&self) -> bool { self.eqs.is_empty() }
 }
 
 struct VarMapIter<'a> {
@@ -788,12 +789,12 @@ impl Debug for State {
         let mut seen_vars = HashSet::new();
         let mut state = self;
         loop {
-            for &(_, ref v) in state.eqs.eqs.iter() {
+            for &(_, ref v) in state.eqs.iter() {
                 if let &EqualTo(x) = v {
                     seen_vars.insert(x); 
                 }
             }
-            for &(k, _) in state.eqs.eqs.iter() {
+            for &(k, _) in state.eqs.iter() {
                 let tmp_eq = EqualTo(k);
                 let mut eq = &tmp_eq;
                 if !seen_vars.insert(k) {
