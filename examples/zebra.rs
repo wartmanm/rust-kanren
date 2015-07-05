@@ -123,22 +123,23 @@ fn main() {
     let mut state = State::new();
     fresh!(state, houses);
     let empty = Default::default();
+    fresh!(state, a, b, c, d, e);
+    state.unify(houses, [a, b, c, d, e]);
+    state.unify(c, House { drink: Some(Milk), .. empty });
+    state.unify(a, House { nationality: Some(Norwegian), .. empty });
     let states = single(state)
-        .and(move |state| length(state, houses, 5))
+        .and(move |state| neighbor(state, House { nationality: Some(Norwegian), .. empty }, House { color: Some(Blue), .. empty }, houses))
+        .and(move |state| to_right(state, House { color: Some(Green), .. empty }, House { color: Some(Ivory), .. empty }, houses))
         .and(move |state| contains(state, House { nationality: Some(English), color: Some(Red), .. empty }, houses))
+        .and(move |state| contains(state, House { color: Some(Yellow), cigarette: Some(Kool), .. empty }, houses))
         .and(move |state| contains(state, House { nationality: Some(Spanish), pet: Some(Dog), .. empty }, houses))
         .and(move |state| contains(state, House { color: Some(Green), drink: Some(Coffee), .. empty }, houses))
         .and(move |state| contains(state, House { nationality: Some(Ukranian), drink: Some(Tea), .. empty }, houses))
-        .and(move |state| to_right(state, House { color: Some(Green), .. empty }, House { color: Some(Ivory), .. empty }, houses))
-        .and(move |state| contains(state, House { pet: Some(Snail), cigarette: Some(OldGold), .. empty }, houses))
-        .and(move |state| contains(state, House { color: Some(Yellow), cigarette: Some(Kool), .. empty }, houses))
-        .and(move |state| index(state, House { drink: Some(Milk), .. empty }, houses, 2))
-        .and(move |state| index(state, House { nationality: Some(Norwegian), .. empty }, houses, 0))
-        .and(move |state| neighbor(state, House { cigarette: Some(Chesterfield), .. empty }, House { pet: Some(Fox), .. empty }, houses))
-        .and(move |state| neighbor(state, House { cigarette: Some(Kool), .. empty }, House { pet: Some(Horse), .. empty }, houses))
         .and(move |state| contains(state, House { drink: Some(OrangeJuice), cigarette: Some(LuckyStrike), .. empty }, houses))
         .and(move |state| contains(state, House { nationality: Some(Japanese), cigarette: Some(Parliament), .. empty }, houses))
-        .and(move |state| neighbor(state, House { nationality: Some(Norwegian), .. empty }, House { color: Some(Blue), .. empty }, houses))
+        .and(move |state| contains(state, House { pet: Some(Snail), cigarette: Some(OldGold), .. empty }, houses))
+        .and(move |state| neighbor(state, House { cigarette: Some(Kool), .. empty }, House { pet: Some(Horse), .. empty }, houses))
+        .and(move |state| neighbor(state, House { cigarette: Some(Chesterfield), .. empty }, House { pet: Some(Fox), .. empty }, houses))
         .and(move |state| contains(state, House { drink: Some(Water), .. empty }, houses))
         .and(move |state| contains(state, House { pet: Some(Zebra), .. empty }, houses));
     for (i, state) in states.into_iter().enumerate().take(100) {
