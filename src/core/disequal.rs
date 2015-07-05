@@ -104,14 +104,14 @@ impl Constraint for Disequal {
                 return Irrelevant;
             }
         }
-        if proxy.eqs.eqs.is_empty() {
+        if proxy.parent.proxy_eqs.eqs.is_empty() {
             println!("succeeded unification with no additions, disequality constraint failed");
             return Failed;
         }
 
         let mut all_unchanged = true;
         let mut updated = Disequal::new_empty();
-        for &(k, _) in proxy.eqs.eqs.iter() {
+        for &(k, _) in proxy.parent.proxy_eqs.eqs.iter() {
             let eqvar = match proxy.get_ref(k) {
                 // We don't care about values added by overwrite() -- they indicate that something
                 // had to be updated (so it passes) but the value will be gone when we roll back

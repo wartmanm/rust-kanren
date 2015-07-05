@@ -33,19 +33,16 @@ impl<A> Copy for Var<A> { }
 ///! unifications have failed.
 pub struct State {
     eqs: VarMap,
-    ok: bool,
     // TODO: use a reference instead
     parent: Option<Rc<State>>,
     constraints: ConstraintStore,
-    proxy_eqs: Option<VarMap>,
+    proxy_eqs: VarMap,
 }
 
 ///! StateProxy is used to identify and include or roll back the substitutions added during
 ///! unification, which is necessary for constraints.
 pub struct StateProxy<'a> {
-    eqs: VarMap,
-    ok: bool,
-    parent: &'a State,
+    parent: &'a mut State,
 }
 
 ///! Enum representing the possible outcomes of `Constraint::update`().
@@ -261,17 +258,13 @@ enum VarRef {
     EqualTo(UntypedVar),
 }
 
-///! StateProxy without the parent ref, so that the parent can be mutated and the proxy merged in.
-struct StateProxyMerge {
-    eqs: VarMap,
-    ok: bool,
-}
 
 ///! Stores Var -> value mappings.  An implementation detail required by
 ///  `Constraint::relevant`.
 pub struct VarMap {
     id: UntypedVar,
     eqs: Vec<(UntypedVar, VarRef)>,
+    ok: bool,
 }
 
 #[derive(Clone)]
@@ -365,12 +358,12 @@ impl Unifier for State {
     }
 
     fn fail(&mut self) -> &mut State {
-        self.ok = false;
+        self.eqs.ok = false;
         self
     }
 
     fn ok(&self) -> bool {
-        self.ok
+        self.eqs.ok
     }
 }
 
@@ -379,10 +372,9 @@ impl State {
     pub fn new() -> State {
         State {
             eqs: VarMap::new(),
-            ok: true,
             parent: None,
             constraints: ConstraintStore::new(),
-            proxy_eqs: Some(VarMap::new()),
+            proxy_eqs: VarMap::new(),
         }
     }
 
@@ -392,10 +384,9 @@ impl State {
         let constraints = parent.constraints.clone();
         State {
             eqs: VarMap::with_parent(&parent.eqs),
-            ok: true,
             parent: Some(parent.clone()),
             constraints: constraints,
-            proxy_eqs: Some(VarMap::new()),
+            proxy_eqs: VarMap::new(),
         }
     }
 
@@ -419,13 +410,12 @@ impl State {
     ///! both are set.  If the value is a container, this will recurse and call unify() on the
     ///! contained types; otherwise it simply compares them.
     fn untyped_unify(&mut self, a: UntypedVar, b: UntypedVar, typeid: TypeId) -> bool {
-        let merge = {
+        {
             let mut proxy = StateProxy::new(self);
             proxy.untyped_unify(a, b, typeid);
-            proxy.merge()
-        };
-        let relevant = self.constraints.get_relevant_constraints(&merge.eqs, Vec::new());
-        merge.merge_down(self);
+        }
+        let relevant = self.constraints.get_relevant_constraints(&self.proxy_eqs, Vec::new());
+        self.merge_proxy();
         if !self.ok() {
             return false;
         }
@@ -453,13 +443,12 @@ impl State {
         while let Some(constraint) = relevant.pop() {
             let constraint = self.update_constraint(constraint);
             // run condition.test()
-            let (result, merge) = {
+            let result = {
                 let mut proxy = StateProxy::new(self);
-                let result = constraint.test(&mut proxy);
-                (result, proxy.merge())
+                constraint.test(&mut proxy)
             };
             // restore state and get updated condition
-            merge.restore(self);
+            self.restore_proxy();
             //println!("ok: {}, test result: {:?}", self.ok(), result);
             let newconstraint = match result {
                 Failed => { self.fail(); return false; }
@@ -469,22 +458,21 @@ impl State {
             };
             // run condition.update()
             //println!("constraint passed test, calling update()");
-            let (result, merge) = {
+            let result = {
                 let mut proxy = StateProxy::new(self);
-                let result = newconstraint.update(&mut proxy);
-                (result, proxy.merge())
+                newconstraint.update(&mut proxy)
             };
             // get updated condition
             let retconstraint = match result {
-                Failed => { self.fail(); merge.restore(self); return false; }
+                Failed => { self.fail(); self.restore_proxy(); return false; }
                 Irrelevant => None,
                 Unchanged => Some(newconstraint),
                 Updated(x) => Some(Rc::new(x)),
             };
             // see if any constraints became relevant due to update(), then merge and return the
             // constraint to the list
-            relevant = self.constraints.get_relevant_constraints(&merge.eqs, relevant);
-            merge.merge_down(self);
+            relevant = self.constraints.get_relevant_constraints(&self.proxy_eqs, relevant);
+            self.merge_proxy();
             if let Some(x) = retconstraint {
                 let x = self.update_constraint(x);
                 self.constraints.constraints.push(x);
@@ -515,6 +503,13 @@ impl State {
     pub fn update_var(&self, var: &mut UntypedVar) {
         *var = self.follow_id(*var);
     }
+
+    fn merge_proxy(&mut self) {
+        self.eqs.merge(&mut self.proxy_eqs);
+    }
+    fn restore_proxy(&mut self) {
+        self.proxy_eqs.clear();
+    }
 }
 
 impl<'a> VarRetrieve for StateProxy<'a> {
@@ -525,13 +520,13 @@ impl<'a> VarRetrieve for StateProxy<'a> {
 
 impl<'a> VarStore for StateProxy<'a> {
     fn store_value<A>(&mut self, value: A) -> Var<A>
-    where A : VarWrapper + ToVar + 'static { self.eqs.store_value(value) }
-    fn make_var<A>(&mut self) -> Var<A> where A : ToVar { self.eqs.make_var() }
+    where A : VarWrapper + ToVar + 'static { self.parent.proxy_eqs.store_value(value) }
+    fn make_var<A>(&mut self) -> Var<A> where A : ToVar { self.parent.proxy_eqs.make_var() }
 }
 
 impl<'a> FollowRef for StateProxy<'a> {
     fn get_ref(&self, id: UntypedVar) -> &VarRef {
-        match self.eqs.get(&id) {
+        match self.parent.proxy_eqs.get(&id) {
             Some(x) => x,
             None => self.parent.get_ref(id)
         }
@@ -546,23 +541,20 @@ impl<'a> Unifier for StateProxy<'a> {
     }
 
     fn fail(&mut self) -> &mut StateProxy<'a> {
-        self.ok = false;
+        self.parent.proxy_eqs.ok = false;
         self
     }
 
     fn ok(&self) -> bool {
-        self.ok
+        self.parent.proxy_eqs.ok
     }
 }
 
 impl<'a> StateProxy<'a> {
     fn new(parent: &'a mut State) -> StateProxy<'a> {
-        let mut eqs = parent.proxy_eqs.take().unwrap();
-        eqs.id = parent.eqs.id;
-        StateProxy { eqs: eqs, ok: parent.ok, parent: parent }
-    }
-    fn merge(self) -> StateProxyMerge {
-        StateProxyMerge { eqs: self.eqs, ok: self.ok }
+        parent.proxy_eqs.id = parent.eqs.id;
+        parent.proxy_eqs.ok = parent.eqs.ok;
+        StateProxy { parent: parent }
     }
 
     pub fn make_var_of<A>(&mut self, value: A) -> Var<<A as ToVar>::VarType> where A: ToVar {
@@ -571,7 +563,7 @@ impl<'a> StateProxy<'a> {
 
     pub unsafe fn overwrite_var<A>(&mut self, var: Var<A>, new_value: A)
     where A: VarWrapper + ToVar + 'static {
-        self.eqs.insert(var.untyped(), Exactly(ExactVal::new(new_value), TypeId::of::<A>()));
+        self.parent.proxy_eqs.insert(var.untyped(), Exactly(ExactVal::new(new_value), TypeId::of::<A>()));
     }
 
     ///! Unify two variables.  Inserts an EqualTo if one or both are unset, or calls _equals_ if
@@ -613,12 +605,12 @@ impl<'a> StateProxy<'a> {
                 let ok = match equals.0 {
                     UnifyResultInner::Success => { true },
                     UnifyResultInner::Failure => {
-                        self.ok = false;
+                        self.parent.proxy_eqs.ok = false;
                         false
                     },
                     UnifyResultInner::Overwrite(newval) => {
-                        self.eqs.insert(a_id, EqualTo(b_id));
-                        self.eqs.insert(b_id, Exactly(Value(newval), typeid));
+                        self.parent.proxy_eqs.insert(a_id, EqualTo(b_id));
+                        self.parent.proxy_eqs.insert(b_id, Exactly(Value(newval), typeid));
                         true
                     },
                 };
@@ -634,12 +626,12 @@ impl<'a> StateProxy<'a> {
             FreshPtr => EqualTo(eq_src),
         };
         //println!("assigning {:?} equal to {:?} (= {:?})", eq_dst, eq_src, src_val);
-        self.eqs.insert(eq_dst, src_val);
+        self.parent.proxy_eqs.insert(eq_dst, src_val);
         true
     }
 
     pub fn get_updated_var(&self, var: UntypedVar) -> UntypedVar {
-        match self.eqs.get(&var) {
+        match self.parent.proxy_eqs.get(&var) {
             Some(&EqualTo(x)) => x,
             _ => var
         }
@@ -648,7 +640,7 @@ impl<'a> StateProxy<'a> {
     pub fn get_changed_value<A>(&self, a: Var<A>) -> Option<&A> where A : ToVar {
         let mut id = a.var;
         loop {
-            match self.eqs.get(&id).or_else(|| self.parent.eqs.get(&id)) {
+            match self.parent.proxy_eqs.get(&id).or_else(|| self.parent.eqs.get(&id)) {
                 Some(x) => match x {
                     &EqualTo(new_id) => { id = new_id },
                     &Exactly(Fresh, _) => { return None; }
@@ -703,6 +695,7 @@ impl VarMap {
         VarMap {
             id: UntypedVar(0),
             eqs: Vec::new(),
+            ok: true,
         }
     }
     fn with_parent(parent: &VarMap) -> VarMap {
@@ -710,6 +703,7 @@ impl VarMap {
         VarMap {
             id: UntypedVar(id + 1),
             eqs: Vec::new(),
+            ok: true,
         }
     }
     pub fn contains_key(&self, id: &UntypedVar) -> bool {
@@ -730,6 +724,18 @@ impl VarMap {
     }
     fn iter(&self) -> VarMapIter {
         VarMapIter { iter: self.eqs.iter() }
+    }
+    fn merge(&mut self, other: &mut VarMap) {
+        let range = 0..other.eqs.len();
+        // TODO: more efficient merge
+        for (var, eq) in other.eqs.drain(range) {
+            self.insert(var, eq);
+        }
+        self.id = other.id;
+        self.ok = other.ok;
+    }
+    fn clear(&mut self) {
+        self.eqs.clear();
     }
 }
 
@@ -766,23 +772,6 @@ impl ConstraintStore {
     }
 }
 
-impl StateProxyMerge {
-    fn merge_down(mut self, parent: &mut State) {
-        let range = 0..self.eqs.eqs.len();
-        // TODO: more efficient merge
-        for (var, eq) in self.eqs.eqs.drain(range) {
-            parent.eqs.insert(var, eq);
-        }
-        parent.eqs.id = self.eqs.id;
-        parent.proxy_eqs = Some(self.eqs);
-        parent.ok = self.ok;
-    }
-    fn restore(mut self, parent: &mut State) {
-        self.eqs.eqs.clear();
-        parent.proxy_eqs = Some(self.eqs);
-    }
-}
-
 impl<A> Debug for Var<A>
 where A : ToVar {
     fn fmt(&self, fmt: &mut Formatter) -> ::std::fmt::Result {
@@ -794,7 +783,7 @@ impl Debug for State {
     fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
         try!(writeln!(fmt, "State {{"));
         try!(writeln!(fmt, "\tid: {:?}", self.eqs.id));
-        try!(writeln!(fmt, "\tok: {:?}", self.ok));
+        try!(writeln!(fmt, "\tok: {:?}", self.eqs.ok));
         try!(writeln!(fmt, "\teqs: {{"));
         let mut seen_vars = HashSet::new();
         let mut state = self;
