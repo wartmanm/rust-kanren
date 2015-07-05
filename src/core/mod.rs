@@ -63,9 +63,16 @@ pub trait ToVar : Debug + Any {
 ///! Constraints placed on one or more variables can alter whether a unification succeeds or
 ///  fails, or make other changes, if those variables are affected.
 pub trait Constraint: Debug + Sized {
+    ///! Apply the constraint and return a ContraintResult.
     fn update(&self, _: &mut StateProxy) -> ConstraintResult<Self> { ConstraintResult::Unchanged }
+    ///! Called to see if a constraint is affected by a newly performed unification.  This should
+    ///! call varmap.contains_key() for each variable in the constraint.
     fn relevant(&self, _: &VarMap) -> bool;
+    ///! Called to update a constraint's variables when unification has assigned them to be equal
+    ///! to other variables.  Should call state.update_var() for each variable in the constraint.
     fn update_vars(&mut self, _: &State);
+    ///! (Optional) Called to determine whether update_vars() needs to be called.  Should call
+    ///! varmap.need_update() for each variable in the constraint.
     fn need_update(&self, vars: &VarMap) -> bool { self.relevant(vars) }
 }
 
@@ -84,11 +91,12 @@ trait BoxedConstraint: Debug {
 
 struct ConstraintWrapper<A: Constraint + Clone>(A);
 
+///! Helper trait for cloning VarWrappers.  Has a blanket impl for all VarWrapper + Clone.
 pub trait VarWrapperClone {
     fn clone_boxed(&self) -> Box<VarWrapper>;
 }
 
-impl<T> VarWrapperClone for T where T: VarWrapper + Clone + 'static {
+impl<T> VarWrapperClone for T where T: VarWrapper + Clone {
     fn clone_boxed(&self) -> Box<VarWrapper> {
         Box::new(self.clone())
     }
@@ -163,6 +171,7 @@ pub trait Unifier {
     }
 }
 
+///! Represents possible results of `VarWrapper::unify_with()`.
 pub struct UnifyResult(UnifyResultInner);
 
 enum UnifyResultInner {
@@ -188,8 +197,14 @@ pub trait VarWrapper : Debug + 'static + Any + VarWrapperClone {
     ///! Compare two variables for equality.  For containers this entails unifying the contained
     ///! variables; for everything else it's no different from PartialEq.
     fn unify_with(&self, other: &VarWrapper, state: &mut StateProxy) -> UnifyResult;
+    ///! (Optional) Return the number of possible values returned by `value_iter`.  This is used by
+    ///! `assign_all_values` to determine the variables needing assignment.
     fn value_count(&self) -> usize { 1 }
+    ///! (Optional) Return an iterator over the values this variable can take.  This shouldn't be called if
+    ///! `value_count()` returns 1.
     fn value_iter(&self) -> Box<Iterator<Item=Box<VarWrapper>>> { panic!() }
+    ///! (Optional) Must be overridden to return `true` if `unify_with()` ever returns `Overwrite` -- this
+    ///! disables an optimization that's incorrect in such a case.
     fn uses_overwrite(&self) -> bool { false }
 }
 
@@ -198,6 +213,8 @@ trait FollowRef {
     ///! first result found, in the current or any parent state, but doesn't follow EqualTos.
     fn get_ref(&self, id: UntypedVar) -> &VarRef;
 
+    ///! Follow unlimited levels of indirection to find the value of a variable, the UntypedVar
+    ///! that directly refers to it, and its type.
     fn follow_ref(&self, mut id: UntypedVar) -> (UntypedVar, &ExactVal, TypeId) {
         loop {
             match self.get_ref(id) {
@@ -208,8 +225,7 @@ trait FollowRef {
     }
 
     ///! Follow unlimited levels of indirection to find the UntypedVar which a variable is equal to
-    ///! and which directly holds a value.  This is pretty inefficient and should probably be
-    ///! combined with get_exact_val() to return a (UntypedVar, ExactVal) tuple.
+    ///! and which directly holds a value.
     fn follow_id(&self, id: UntypedVar) -> UntypedVar {
         self.follow_ref(id).0
     }
@@ -587,6 +603,8 @@ impl<'a> StateProxy<'a> {
                         false
                     },
                     UnifyResultInner::Overwrite(newval) => {
+                        debug_assert!((&*newval).get_type_id() == typeid);
+                        debug_assert!(a_ex.uses_overwrite());
                         self.parent.proxy_eqs.insert(a_id, EqualTo(b_id));
                         self.parent.proxy_eqs.insert(b_id, Exactly(Value(newval), typeid));
                         true
