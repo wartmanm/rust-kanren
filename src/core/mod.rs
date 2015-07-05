@@ -46,7 +46,6 @@ pub struct StateProxy<'a> {
     eqs: VarMap,
     ok: bool,
     parent: &'a State,
-    overwrite_vars: Option<(UntypedVar, UntypedVar)>,
 }
 
 ///! Enum representing the possible outcomes of `Constraint::update`().
@@ -178,11 +177,31 @@ pub trait Unifier {
     }
 }
 
+pub struct UnifyResult(UnifyResultInner);
+
+enum UnifyResultInner {
+    Success,
+    Failure,
+    Overwrite(Box<VarWrapper>),
+}
+
+impl From<bool> for UnifyResult {
+    fn from(val: bool) -> UnifyResult {
+        UnifyResult(if val { UnifyResultInner::Success } else { UnifyResultInner::Failure })
+    }
+}
+
+impl UnifyResult {
+    pub unsafe fn overwrite<A>(a: A) -> UnifyResult where A: VarWrapper {
+        UnifyResult(UnifyResultInner::Overwrite(Box::new(a)))
+    }
+}
+
 ///! Trait implemented by all variable types.
 pub trait VarWrapper : Debug + 'static + Any + VarWrapperClone {
     ///! Compare two variables for equality.  For containers this entails unifying the contained
     ///! variables; for everything else it's no different from PartialEq.
-    fn _equals_(&self, &VarWrapper, &mut StateProxy) -> bool;
+    fn unify_with(&self, other: &VarWrapper, state: &mut StateProxy) -> UnifyResult;
     fn value_count(&self) -> usize { 1 }
     fn value_iter(&self) -> Box<Iterator<Item=Box<VarWrapper>>> { panic!() }
     fn uses_overwrite(&self) -> bool { false }
@@ -540,7 +559,7 @@ impl<'a> StateProxy<'a> {
     fn new(parent: &'a mut State) -> StateProxy<'a> {
         let mut eqs = parent.proxy_eqs.take().unwrap();
         eqs.id = parent.eqs.id;
-        StateProxy { eqs: eqs, ok: parent.ok, parent: parent, overwrite_vars: None }
+        StateProxy { eqs: eqs, ok: parent.ok, parent: parent }
     }
     fn merge(self) -> StateProxyMerge {
         StateProxyMerge { eqs: self.eqs, ok: self.ok }
@@ -550,13 +569,6 @@ impl<'a> StateProxy<'a> {
         value.into_var(self)
     }
 
-    pub unsafe fn overwrite<A>(&mut self, new_value: A)
-    where A: VarWrapper + ToVar + 'static {
-        //println!("overwriting var {:?} value {:?} with {:?}", old_var, self.parent.eqs.get(&old_var), new_value);
-        let (from, to) = self.overwrite_vars.unwrap();
-        self.eqs.insert(from, EqualTo(to));
-        self.eqs.insert(to, Exactly(ExactVal::new(new_value), TypeId::of::<A>()));
-    }
     pub unsafe fn overwrite_var<A>(&mut self, var: Var<A>, new_value: A)
     where A: VarWrapper + ToVar + 'static {
         self.eqs.insert(var.untyped(), Exactly(ExactVal::new(new_value), TypeId::of::<A>()));
@@ -586,10 +598,9 @@ impl<'a> StateProxy<'a> {
 
             // Return values as const ptrs so we can call _equals_ with ourself as the argument later.
             // This should be safe because they point to the boxed values, not into the hashmap
-            // (so we'll be okay when it resizes) and there are no operations which remove values
+            // (so we'll be okay when it resizes) and there are no safe operations which remove values
             // from it.
-            // TODO: it's still gross, though.  Using self.parent.get_ref() would work, except for
-            // overwrite().
+            // TODO: it's still gross, though.
             unsafe { (a_val.as_ref(), a_id, b_val.as_ref(), b_id) }
         };
         let (eq_dst, eq_src, src_val) = match (a_val, b_val) {
@@ -598,14 +609,20 @@ impl<'a> StateProxy<'a> {
             (ValuePtr(a_ex), ValuePtr(b_ex)) => {
                 let (a_ex, b_ex) = unsafe { (&*a_ex, &*b_ex) };
                 //println!("comparing {:?} and {:?}", a_ex, b_ex);
-                let temp_overwrite = self.overwrite_vars;
-                self.overwrite_vars = Some((a_id, b_id));
-                let equals = a_ex._equals_(&*b_ex, self);
-                if !equals {
-                    self.ok = false;
-                }
-                self.overwrite_vars = temp_overwrite;
-                return equals;
+                let equals = a_ex.unify_with(&*b_ex, self);
+                let ok = match equals.0 {
+                    UnifyResultInner::Success => { true },
+                    UnifyResultInner::Failure => {
+                        self.ok = false;
+                        false
+                    },
+                    UnifyResultInner::Overwrite(newval) => {
+                        self.eqs.insert(a_id, EqualTo(b_id));
+                        self.eqs.insert(b_id, Exactly(Value(newval), typeid));
+                        true
+                    },
+                };
+                return ok;
             },
         };
         let src_val: VarRef = match src_val {

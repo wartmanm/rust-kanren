@@ -1,4 +1,4 @@
-use core::{ToVar, StateProxy, VarWrapper, Var, Unifier, VarStore};
+use core::{ToVar, StateProxy, VarWrapper, Var, Unifier, VarStore, UnifyResult};
 use std::rc::Rc;
 use std::marker::PhantomData;
 use list::List;
@@ -11,9 +11,9 @@ use list::List;
 #[macro_export]
 macro_rules! default_varwrapper_impl {
     ($x:ty) => {
-        fn _equals_(&self, other: &$crate::core::VarWrapper, _: &mut $crate::core::StateProxy) -> bool {
+        fn unify_with(&self, other: &$crate::core::VarWrapper, _: &mut $crate::core::StateProxy) -> $crate::core::UnifyResult {
             let other = other.get_wrapped_value::<$x>();
-            self == other
+            (self == other).into()
         }
     }
 }
@@ -102,12 +102,12 @@ macro_rules! tuple_wrapper {
         }
         impl<$($param,)*> VarWrapper for ($(Var<$param>,)*) where $($param: ToVar,)* {
             #[allow(non_snake_case)]
-            fn _equals_(&self, other: &VarWrapper, state: &mut StateProxy) -> bool {
+            fn unify_with(&self, other: &VarWrapper, state: &mut StateProxy) -> UnifyResult {
                 let &($($param,)*) = other.get_wrapped_value::<($(Var<$param>),*)>();
                 let &($($arg,)*) = self;
                 state
                 $(.unify_vars($param, $arg))*
-                .ok()
+                .ok().into()
             }
         }
     }
@@ -119,13 +119,13 @@ tuple_wrapper!((A a, B b, C c, D d));
 tuple_wrapper!((A a, B b, C c, D d, E e));
 
 impl<A> VarWrapper for Option<Var<A>> where A: ToVar {
-    fn _equals_(&self, other: &VarWrapper, state: &mut StateProxy) -> bool {
+    fn unify_with(&self, other: &VarWrapper, state: &mut StateProxy) -> UnifyResult {
         let other = other.get_wrapped_value::<Option<Var<A>>>();
-        match (self, other) {
+        (match (self, other) {
             (&None, &None) => true,
             (&Some(a), &Some(b)) => state.unify_vars(a, b).ok(),
             _ => false,
-        }
+        }).into()
     }
 }
 
@@ -138,13 +138,13 @@ impl<A> ToVar for Option<A> where A: ToVar {
 }
 
 impl<A, B> VarWrapper for Result<Var<A>, Var<B>> where A: ToVar, B: ToVar {
-    fn _equals_(&self, other: &VarWrapper, state: &mut StateProxy) -> bool {
+    fn unify_with(&self, other: &VarWrapper, state: &mut StateProxy) -> UnifyResult {
         let other = other.get_wrapped_value::<Result<Var<A>, Var<B>>>();
-        match (self, other) {
+        (match (self, other) {
             (&Ok(a), &Ok(b)) => state.unify_vars(a, b).ok(),
             (&Err(a), &Err(b)) => state.unify_vars(a, b).ok(),
             _ => false,
-        }
+        }).into()
     }
 }
 

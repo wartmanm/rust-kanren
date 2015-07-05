@@ -1,6 +1,6 @@
 use finitedomain::Fd::*;
 use std::collections::HashSet;
-use core::{VarWrapper, StateProxy, Var, ToVar, VarStore, VarRetrieve, State, Unifier};
+use core::{VarWrapper, StateProxy, Var, ToVar, VarStore, VarRetrieve, State, Unifier, UnifyResult};
 use iter::{StateIter, single};
 use tailiter::TailIterItem::*;
 use tailiter::{TailIterItem, TailIterator, TailIterHolder};
@@ -111,21 +111,18 @@ impl Fd {
 
 
 impl VarWrapper for Fd {
-    fn _equals_(&self, other: &VarWrapper, state: &mut StateProxy) -> bool {
+    fn unify_with(&self, other: &VarWrapper, _: &mut StateProxy) -> UnifyResult {
         let other = other.get_wrapped_value::<Fd>();
         if let (Some(x), Some(y)) = (self.single_value(), other.single_value()) {
-            return x == y;
+            return (x == y).into();
         }
         if self == other {
-            return true;
+            return true.into();
         }
         let result = self.combine(other);
-        if !result.is_valid() { return false; }
+        if !result.is_valid() { return false.into(); }
 
-        unsafe {
-            state.overwrite(result);
-        };
-        return true;
+        unsafe { return UnifyResult::overwrite(result); }
     }
     fn value_count(&self) -> usize {
         match *self {

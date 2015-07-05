@@ -1,7 +1,7 @@
 use std::iter::IntoIterator;
 use std::fmt::{Debug, Formatter};
 use std::any::Any;
-use core::{ToVar, VarWrapper, State, StateProxy, Var, VarStore, VarRetrieve, Unifier};
+use core::{ToVar, VarWrapper, State, StateProxy, Var, VarStore, VarRetrieve, Unifier, UnifyResult};
 pub use list::List::Nil; // so you can import list::{Pair, Nil}
 use list::List::Pair as VarPair;
 
@@ -38,25 +38,25 @@ impl<A> Copy for List<A> where A: ToVar { }
 
 impl<A> VarWrapper for List<A>
 where A : ToVar {
-    fn _equals_(&self, other: &VarWrapper, ctxt: &mut StateProxy) -> bool {
+    fn unify_with(&self, other: &VarWrapper, ctxt: &mut StateProxy) -> UnifyResult {
         let mut a = *self;
         let mut b = *other.get_wrapped_value();
         loop {
             match (a, b) {
-                (Nil, Nil) => { return true; }
+                (Nil, Nil) => { return true.into(); }
                 (VarPair(h1, t1), VarPair(h2, t2)) => {
                     //println!("unifying List...");
                     if !ctxt.unify_vars(h1, h2).ok() {
-                        return false;
+                        return false.into();
                     }
                     if let (Some(t1val), Some(t2val)) = (ctxt.get_value(t1), ctxt.get_value(t2)) {
                         a = *t1val;
                         b = *t2val;
                         continue;
                     }
-                    return ctxt.unify_vars(t1, t2).ok();
+                    return ctxt.unify_vars(t1, t2).ok().into();
                 },
-                _ => { return false; }
+                _ => { return false.into(); }
             }
         }
     }
