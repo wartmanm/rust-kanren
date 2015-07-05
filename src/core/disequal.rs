@@ -90,12 +90,7 @@ impl Disequal {
         println!("{:?} relevant to {:?}: {}", var, self, ret);
         ret
     }
-}
-
-
-impl Constraint for Disequal {
-        
-    fn test(&self, proxy: &mut StateProxy) -> ConstraintResult<Disequal> {
+    fn perform_test(&self, proxy: &mut StateProxy) -> ConstraintResult<Disequal> {
         println!("updating {:?}", self);
         for &(a, b, ty) in self.pairs.iter() {
             proxy.untyped_unify(a, b, ty);
@@ -133,6 +128,15 @@ impl Constraint for Disequal {
 
         println!("returning updated disequal {:?}", updated);
         return Updated(updated);
+    }
+}
+
+impl Constraint for Disequal {
+    fn update(&self, proxy: &mut StateProxy) -> ConstraintResult<Disequal> {
+        let result = self.perform_test(proxy);
+        proxy.parent.proxy_eqs.clear();
+        proxy.parent.proxy_eqs.ok = proxy.parent.eqs.ok;
+        result
     }
 
     fn relevant(&self, proxy: &VarMap) -> bool {

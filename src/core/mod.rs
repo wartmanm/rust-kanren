@@ -63,7 +63,6 @@ pub trait ToVar : Debug + Any {
 ///! Constraints placed on one or more variables can alter whether a unification succeeds or
 ///  fails, or make other changes, if those variables are affected.
 pub trait Constraint: Debug + Sized {
-    fn test(&self, _: &mut StateProxy) -> ConstraintResult<Self> { ConstraintResult::Unchanged }
     fn update(&self, _: &mut StateProxy) -> ConstraintResult<Self> { ConstraintResult::Unchanged }
     fn relevant(&self, _: &VarMap) -> bool;
     fn update_vars(&mut self, _: &State);
@@ -76,7 +75,6 @@ pub trait ToConstraint {
 }
 
 trait BoxedConstraint: Debug {
-    fn test(&self, _: &mut StateProxy) -> ConstraintResult<Box<BoxedConstraint>>;
     fn update(&self, _: &mut StateProxy) -> ConstraintResult<Box<BoxedConstraint>>;
     fn relevant(&self, _: &VarMap) -> bool;
     fn update_vars(&mut self, _: &State);
@@ -99,15 +97,6 @@ impl<T> VarWrapperClone for T where T: VarWrapper + Clone + 'static {
 type RcConstraint = Rc<Box<BoxedConstraint>>;
 
 impl<A> BoxedConstraint for ConstraintWrapper<A> where A : Constraint + Clone + 'static {
-    fn test(&self, proxy: &mut StateProxy) -> ConstraintResult<Box<BoxedConstraint>> {
-        use ::core::ConstraintResult::*;
-        match self.0.test(proxy) {
-            Updated(x) => Updated(Box::new(ConstraintWrapper(x))),
-            Failed => Failed,
-            Irrelevant => Irrelevant,
-            Unchanged => Unchanged,
-        }
-    }
     fn update(&self, proxy: &mut StateProxy) -> ConstraintResult<Box<BoxedConstraint>> {
         use ::core::ConstraintResult::*;
         match self.0.update(proxy) {
@@ -443,30 +432,19 @@ impl State {
         while let Some(constraint) = relevant.pop() {
             let constraint = self.update_constraint(constraint);
             // run condition.test()
-            let result = {
-                let mut proxy = StateProxy::new(self);
-                constraint.test(&mut proxy)
-            };
             // restore state and get updated condition
-            self.restore_proxy();
             //println!("ok: {}, test result: {:?}", self.ok(), result);
-            let newconstraint = match result {
-                Failed => { self.fail(); return false; }
-                Irrelevant => { continue; }
-                Unchanged => { constraint },
-                Updated(x) => { Rc::new(x) },
-            };
             // run condition.update()
             //println!("constraint passed test, calling update()");
             let result = {
                 let mut proxy = StateProxy::new(self);
-                newconstraint.update(&mut proxy)
+                constraint.update(&mut proxy)
             };
             // get updated condition
             let retconstraint = match result {
                 Failed => { self.fail(); self.restore_proxy(); return false; }
                 Irrelevant => None,
-                Unchanged => Some(newconstraint),
+                Unchanged => Some(constraint),
                 Updated(x) => Some(Rc::new(x)),
             };
             // see if any constraints became relevant due to update(), then merge and return the

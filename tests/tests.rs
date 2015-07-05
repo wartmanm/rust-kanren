@@ -329,7 +329,7 @@ impl ToConstraint for ConstraintFn {
 }
 
 impl Constraint for ConstraintFn {
-    fn test(&self, proxy: &mut StateProxy) -> ConstraintResult<ConstraintFn> { (self.f)(proxy) }
+    fn update(&self, proxy: &mut StateProxy) -> ConstraintResult<ConstraintFn> { (self.f)(proxy) }
     fn relevant(&self, _: &VarMap) -> bool { true }
     fn update_vars(&mut self, vars: &State) {
         for var in self.vars.iter_mut() {
@@ -361,9 +361,9 @@ fn rollback_fd() {
         println!("proxy value of a: {:?}", proxy.get_value(a));
         assert!(*proxy.get_value(a).unwrap() == Fd::new_values(vec![1, 3]));
         *cr.borrow_mut() = true;
-        ConstraintResult::Unchanged
+        ConstraintResult::Failed
     }));
-    assert!(state.ok());
+    assert!(!state.ok());
     assert!(*constraint_run.borrow());
     println!("orig_a: {:?}, a: {:?}", orig_a, state.get_value(a).unwrap());
     println!("orig_b: {:?}, b: {:?}", orig_b, state.get_value(b).unwrap());
