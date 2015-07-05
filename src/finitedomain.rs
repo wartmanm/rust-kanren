@@ -144,6 +144,7 @@ impl VarWrapper for Fd {
             }
         }
     }
+    fn uses_overwrite(&self) -> bool { true }
 }
 
 

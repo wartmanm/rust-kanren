@@ -76,7 +76,7 @@ value_wrapper!(&'static str);
 value_wrapper!(bool);
 value_wrapper!(char);
 
-value_wrapper!(Box<T>, T: PartialEq);
+value_wrapper!(Box<T>, T: PartialEq & Clone);
 value_wrapper!(Rc<T>, T: PartialEq);
 //value_wrapper!(Vec<T>, T: PartialEq);
 //value_wrapper!(Option<T>, T: PartialEq);

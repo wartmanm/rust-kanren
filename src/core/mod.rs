@@ -90,6 +90,16 @@ trait BoxedConstraint: Debug {
 
 struct ConstraintWrapper<A: Constraint + Clone>(A);
 
+pub trait VarWrapperClone {
+    fn clone_boxed(&self) -> Box<VarWrapper>;
+}
+
+impl<T> VarWrapperClone for T where T: VarWrapper + Clone + 'static {
+    fn clone_boxed(&self) -> Box<VarWrapper> {
+        Box::new(self.clone())
+    }
+}
+
 type RcConstraint = Rc<Box<BoxedConstraint>>;
 
 impl<A> BoxedConstraint for ConstraintWrapper<A> where A : Constraint + Clone + 'static {
@@ -169,12 +179,13 @@ pub trait Unifier {
 }
 
 ///! Trait implemented by all variable types.
-pub trait VarWrapper : Debug + 'static + Any {
+pub trait VarWrapper : Debug + 'static + Any + VarWrapperClone {
     ///! Compare two variables for equality.  For containers this entails unifying the contained
     ///! variables; for everything else it's no different from PartialEq.
     fn _equals_(&self, &VarWrapper, &mut StateProxy) -> bool;
     fn value_count(&self) -> usize { 1 }
     fn value_iter(&self) -> Box<Iterator<Item=Box<VarWrapper>>> { panic!() }
+    fn uses_overwrite(&self) -> bool { false }
 }
 
 trait FollowRef {
@@ -319,7 +330,7 @@ impl FollowRef for State {
                 None => {
                     state = match state.parent {
                         Some(ref x) => &*x,
-                    None => { panic!("could not find reference for {:?} in {:?}", id, self); }
+                        None => { panic!("could not find reference for {:?} in {:?}", id, self); }
                     };
                 }
             }
@@ -581,7 +592,7 @@ impl<'a> StateProxy<'a> {
             // overwrite().
             unsafe { (a_val.as_ref(), a_id, b_val.as_ref(), b_id) }
         };
-        let (eq_dst, eq_src, _) = match (a_val, b_val) {
+        let (eq_dst, eq_src, src_val) = match (a_val, b_val) {
             (FreshPtr, b_ex) => (a_id, b_id, b_ex),
             (a_ex, FreshPtr) => (b_id, a_id, a_ex),
             (ValuePtr(a_ex), ValuePtr(b_ex)) => {
@@ -589,7 +600,7 @@ impl<'a> StateProxy<'a> {
                 //println!("comparing {:?} and {:?}", a_ex, b_ex);
                 let temp_overwrite = self.overwrite_vars;
                 self.overwrite_vars = Some((a_id, b_id));
-                let equals = a_ex._equals_(b_ex, self);
+                let equals = a_ex._equals_(&*b_ex, self);
                 if !equals {
                     self.ok = false;
                 }
@@ -597,9 +608,16 @@ impl<'a> StateProxy<'a> {
                 return equals;
             },
         };
-        debug_assert!(match self.get_ref(eq_dst) { &Exactly(Fresh, _) => true, _ => false });
-        //println!("assigning {:?} equal to {:?} (= {:?})", eq_dst, eq_src), src_val);
-        self.eqs.insert(eq_dst, EqualTo(eq_src));
+        let src_val: VarRef = match src_val {
+            ValuePtr(x) => unsafe {
+                let x = &*x;
+                if x.uses_overwrite() { EqualTo(eq_src) }
+                else { Exactly(Value(x.clone_boxed()), typeid) }
+            },
+            FreshPtr => EqualTo(eq_src),
+        };
+        //println!("assigning {:?} equal to {:?} (= {:?})", eq_dst, eq_src, src_val);
+        self.eqs.insert(eq_dst, src_val);
         true
     }
 
