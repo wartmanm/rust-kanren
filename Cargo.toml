@@ -1,5 +1,5 @@
 [project]
-name = "rusty-kanren"
+name = "rust_kanren"
 version = "0.0.1"
 authors = [ "wartman4404 <wartman4404@my.mstc.edu>" ]
 
