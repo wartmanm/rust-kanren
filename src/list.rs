@@ -1,7 +1,7 @@
 use std::iter::IntoIterator;
 use std::fmt::{Debug, Formatter};
 use std::any::Any;
-use core::{ToVar, VarWrapper, State, StateProxy, Var, VarStore, VarRetrieve, Unifier, UnifyResult};
+use core::{ToVar, VarWrapper, State, StateProxy, Var, VarStore, VarRetrieve, Unifier, UnifyResult, UntypedVar};
 pub use list::List::Nil; // so you can import list::{Pair, Nil}
 use list::List::Pair as VarPair;
 
@@ -60,6 +60,33 @@ where A : ToVar {
             }
         }
     }
+    fn var_iter<'a>(&'a self) -> Option<Box<Iterator<Item=UntypedVar> + 'a>> {
+        match self {
+            &VarPair(h, t) => {
+                Some(Box::new(PairIter { p: [h.untyped(), t.untyped()], pos: 0 }))
+            },
+            &Nil => None,
+        }
+    }
+}
+
+struct PairIter {
+    p: [UntypedVar; 2],
+    pos: u8,
+}
+
+impl Iterator for PairIter {
+    type Item = UntypedVar;
+    fn next(&mut self) -> Option<UntypedVar> {
+        let item = self.p.get(self.pos as usize).map(|x| *x);
+        self.pos += 1;
+        item
+        //let item = match (self.pos, self.p) {
+            //0, &Pair(h, _) => Some(h.untyped()),
+            //1, &Pair(_, t) => Some(t.untyped()),
+            //_ => None,
+        //};
+    }
 }
 
 impl<A> List<A>
@@ -95,19 +122,45 @@ where A : ToVar {
         VarIterator { list: self, state: state }
     }
 
-    ///! Helper method to return a `VarPair` from two values, which need not have been made into
-    ///! variables.
-    pub fn pair<T, Head, Tail>(state: &mut State, head: Head, tail: Tail) -> Var<List<A>>
-    where Head: ToVar<VarType=A>, Tail: ToVar<VarType=List<A>> {
-        let head = state.make_var_of(head);
-        let tail = state.make_var_of(tail);
-        let pair = VarPair(head, tail);
-        state.make_var_of(pair)
-    }
+    /////! Helper method to return a `VarPair` from two values, which need not have been made into
+    /////! variables.
+    //pub fn pair<T, Head, Tail>(state: &mut State, head: Head, tail: Tail) -> Var<List<A>>
+    //where Head: ToVar<VarType=A>, Tail: ToVar<VarType=List<A>> {
+        //let head = state.make_var_of(head);
+        //let tail = state.make_var_of(tail);
+        //let pair = VarPair(head, tail);
+        //state.make_var_of(pair)
+    //}
 
     pub fn build<I>(iter: I) -> ListBuilder<A, <I as IntoIterator>::IntoIter>
     where I: IntoIterator<Item=A>, <I as IntoIterator>::IntoIter: 'static {
         ListBuilder::new(iter)
+    }
+}
+
+pub trait ListExt<A> where A: ToVar {
+    fn check_elem<B>(&self, state: &mut State, elem: B) -> bool where B: ToVar<VarType=A>;
+}
+
+impl<A> ListExt<A> for List<A> where A: ToVar {
+    fn check_elem<B>(&self, state: &mut State, elem: B) -> bool where B: ToVar<VarType=A> {
+        let elem = state.make_var_of(elem);
+        let mut pair = Some(*self);
+        // TODO: make it possible to use var_iter() instead
+        while let Some(VarPair(head, tail)) = pair {
+            if state.are_vars_unified(head, elem) == ::core::Unifiability::AlreadyDone {
+                return true;
+            }
+            pair = state.get_value(tail).map(|x| *x);
+        }
+        return false;
+    }
+}
+
+impl<A> ListExt<A> for Var<List<A>> where A: ToVar {
+    fn check_elem<B>(&self, state: &mut State, elem: B) -> bool where B: ToVar<VarType=A> {
+        let list = state.get_value(*self).map(|&x| x).unwrap_or(Nil);
+        list.check_elem(state, elem)
     }
 }
 

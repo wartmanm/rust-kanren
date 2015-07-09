@@ -3,6 +3,7 @@
 #![feature(get_type_id)]
 #![feature(raw)] // used by VarWrapper::get_wrapped_value().
 #![feature(drain)] // used by StateProxyMerge (minor optimization)
+#![feature(ref_slice)]
 
 #[macro_use]
 pub mod macros;

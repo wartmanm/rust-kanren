@@ -145,6 +145,7 @@ pub trait VarStore {
 pub trait VarRetrieve {
     ///! Retrive a reference to the stored value of a variable, if any.
     fn get_value<A>(&self, a: Var<A>) -> Option<&A> where A : ToVar;
+    fn get_untyped(&self, var: UntypedVar) -> Option<&VarWrapper>;
 }
 
 ///! Unify variables together, and get or change the current success state.
@@ -206,6 +207,7 @@ pub trait VarWrapper : Debug + 'static + Any + VarWrapperClone {
     ///! (Optional) Must be overridden to return `true` if `unify_with()` ever returns `Overwrite` -- this
     ///! disables an optimization that's incorrect in such a case.
     fn uses_overwrite(&self) -> bool { false }
+    fn var_iter<'a>(&'a self) -> Option<Box<Iterator<Item=UntypedVar> + 'a>> { None }
 }
 
 trait FollowRef {
@@ -296,6 +298,9 @@ where A : ToVar {
     pub fn untyped(&self) -> UntypedVar {
         self.var
     }
+    pub fn untyped_ref(&self) -> &UntypedVar {
+        &self.var
+    }
     pub fn untyped_mut(&mut self) -> &mut UntypedVar {
         &mut self.var
     }
@@ -329,6 +334,9 @@ impl ExactVal {
 impl VarRetrieve for State {
     fn get_value<A: ToVar>(&self, var: Var<A>) -> Option<&A> {
         self.get_exact_val_opt(var.var)
+    }
+    fn get_untyped(&self, var: UntypedVar) -> Option<&VarWrapper> {
+        self.get_exact_val(var).opt()
     }
 }
 
@@ -504,11 +512,36 @@ impl State {
     fn restore_proxy(&mut self) {
         self.proxy_eqs.clear();
     }
+
+    pub fn are_vars_unified<A>(&mut self, a: Var<A>, b: Var<A>) -> Unifiability where A: ToVar {
+        use core::Unifiability::*;
+        {
+            let mut proxy = StateProxy::new(self);
+            proxy.untyped_unify(a.var, b.var, TypeId::of::<A>());
+        }
+        let result = if self.proxy_eqs.ok {
+            if self.proxy_eqs.is_empty() { AlreadyDone } else { Possible }
+        } else {
+            Impossible
+        };
+        self.restore_proxy();
+        result
+    }
+}
+
+#[derive(Eq, PartialEq, Copy, Clone)]
+pub enum Unifiability {
+    Impossible,
+    Possible,
+    AlreadyDone,
 }
 
 impl<'a> VarRetrieve for StateProxy<'a> {
     fn get_value<A: ToVar>(&self, var: Var<A>) -> Option<&A> {
         self.get_exact_val_opt(var.var)
+    }
+    fn get_untyped(&self, var: UntypedVar) -> Option<&VarWrapper> {
+        self.get_exact_val(var).opt()
     }
 }
 
@@ -646,7 +679,40 @@ impl<'a> StateProxy<'a> {
             }
         }
     }
+
+    pub fn are_vars_unified<A>(&mut self, a: Var<A>, b: Var<A>) -> Unifiability where A: ToVar {
+        self.inner_are_vars_unified(a.var, b.var, TypeId::of::<A>())
+    }
+
+    pub fn are_vars_unified_untyped(&mut self, a: UntypedVar, b: UntypedVar) -> Unifiability {
+        assert!(self.parent.proxy_eqs.is_empty() && self.parent.proxy_eqs.ok);
+        let (a_id, _, a_ty) = self.follow_ref(a);
+        let (b_id, _, b_ty) = self.follow_ref(b);
+        if a_ty != b_ty {
+            return Unifiability::Impossible;
+        }
+       self.inner_are_vars_unified(a_id, b_id, a_ty)
+    }
+
+    fn inner_are_vars_unified(&mut self, a: UntypedVar, b: UntypedVar, ty: TypeId) -> Unifiability {
+        use core::Unifiability::*;
+        assert!(self.parent.proxy_eqs.is_empty() && self.parent.proxy_eqs.ok);
+        self.untyped_unify(a, b, ty);
+        let result = if self.parent.proxy_eqs.ok {
+            if self.parent.proxy_eqs.is_empty() { AlreadyDone } else { Possible }
+        } else {
+            Impossible
+        };
+        self.parent.restore_proxy();
+        result
+    }
+
+    //pub fn get_child_vars(&self, var: UntypedVar) -> Option<VarCollectionIter> {
+        //self.get_exact_val(var).opt().map(|x| x.var_iter(self))
+    //}
 }
+
+pub type VarCollectionIter<'a> = Box<Iterator<Item=UntypedVar> + 'a>;
 
 impl VarStore for VarMap {
     ///! Add a variable with a new value to the map.  Called by `make_var_of()`.

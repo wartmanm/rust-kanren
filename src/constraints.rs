@@ -1,9 +1,10 @@
 use std::ops::{Add, Sub};
-use core::{ToVar, ToConstraint, Constraint, Var, StateProxy, State, ConstraintResult, VarStore, Unifier, VarRetrieve, VarMap};
+use core::{ToVar, ToConstraint, Constraint, Var, StateProxy, State, ConstraintResult, VarStore, Unifier, VarRetrieve, VarMap, UntypedVar};
 use core::ConstraintResult::*;
 use finitedomain::Fd;
 use finitedomain::Fd::*;
 use std::collections::HashSet;
+use std::borrow::Cow;
 pub use core::disequal::ToDisequal as Disequal;
 
 #[derive(Debug, Clone)]
@@ -412,5 +413,131 @@ impl Constraint for VarFdUsizeConstraint {
     fn update_vars(&mut self, proxy: &State) {
         proxy.update_var(self.fd.untyped_mut());
         proxy.update_var(self.fd.untyped_mut());
+    }
+}
+
+pub struct AbsentConstraint<A, B, C>
+where A: ToVar, B: ToVar<VarType=A>, C: ToVar {
+    elem: B,
+    list: C,
+}
+
+#[derive(Debug)]
+pub struct VarAbsentConstraint<A> where A: ToVar {
+    elem: Var<A>,
+    list: Vec<UntypedVar>,
+    fresh: Vec<UntypedVar>,
+}
+
+impl<A> Clone for VarAbsentConstraint<A> where A: ToVar {
+    fn clone(&self) -> VarAbsentConstraint<A> {
+        VarAbsentConstraint { elem: self.elem, list: self.list.clone(), fresh: self.fresh.clone() }
+    }
+}
+
+impl<A, B, C> ToConstraint for AbsentConstraint<A, B, C>
+where A: ToVar, B: ToVar<VarType=A>, C: ToVar {
+    type ConstraintType = VarAbsentConstraint<A>;
+    fn into_constraint(self, state: &mut State) -> VarAbsentConstraint<A> {
+        let elem = state.make_var_of(self.elem);
+        let listvar = state.make_var_of(self.list);
+        let mut fresh = Cow::Owned(vec![listvar.untyped()]);
+        let mut list = Cow::Owned(Vec::new());
+        push_tail(&mut list, &mut fresh, state);
+        VarAbsentConstraint { elem: elem, list: list.into_owned(), fresh: fresh.into_owned() }
+
+        ////let 
+        ////let constraint = VarAbsentConstraint { elem: elem, list: Vec::new(), fresh: vec![list.untyped()] };
+        ////let mut cow = Cow::Owned(constraint);
+        ////push_tail(&mut cow, state);
+        //cow.into_owned()
+    }
+}
+
+impl<A, B, C> AbsentConstraint<A, B, C>
+where A: ToVar, B: ToVar<VarType=A>, C: ToVar {
+    pub fn new(elem: B, list: C) -> AbsentConstraint<A, B, C> {
+        AbsentConstraint { elem: elem, list: list }
+    }
+}
+
+fn push_tail<U: VarRetrieve>(list: &mut Cow<Vec<UntypedVar>>, fresh: &mut Cow<Vec<UntypedVar>>, state: &U) {
+    //use list::List::Pair as VarPair;
+    //use list::Nil;
+
+    let mut i = 0usize;
+    while let Some(&var) = fresh.get(i) {
+        if let Some(val) = state.get_untyped(var) {
+            fresh.to_mut().swap_remove(i);
+            list.to_mut().push(var);
+            if let Some(iter) = val.var_iter() {
+                for inner_var in iter {
+                    fresh.to_mut().push(inner_var);
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+}
+
+fn check_unify(state: &mut StateProxy, list: &mut Cow<Vec<UntypedVar>>, elem: UntypedVar) -> bool {
+    use core::Unifiability::*;
+    let mut i = 0;
+    while let Some(&var) = list.get(i) {
+        match state.are_vars_unified_untyped(var, elem) {
+            Impossible => { list.to_mut().swap_remove(i); },
+            Possible => { i += 1; },
+            AlreadyDone => { return false; }
+        }
+    }
+    return true;
+}
+
+impl<A> Constraint for VarAbsentConstraint<A> where A: ToVar {
+    fn update(&self, state: &mut StateProxy) -> ConstraintResult<VarAbsentConstraint<A>> {
+        use core::ConstraintResult::*;
+        //let mut me = Cow::Borrowed(self);
+        //push_tail(&mut me, state);
+
+        let mut list = Cow::Borrowed(&self.list);
+        let mut fresh = Cow::Borrowed(&self.fresh);
+        push_tail(&mut list, &mut fresh, state);
+        if !check_unify(state, &mut list, self.elem.untyped()) {
+            return ConstraintResult::Failed;
+        }
+        if !check_unify(state, &mut fresh, self.elem.untyped()) {
+            return ConstraintResult::Failed;
+        }
+
+        if fresh.is_empty() && list.is_empty() {
+            return ConstraintResult::Irrelevant;
+        }
+
+        match (list, fresh) {
+            (Cow::Borrowed(_), Cow::Borrowed(_)) => ConstraintResult::Unchanged,
+            (list, fresh) => {
+                ConstraintResult::Updated(VarAbsentConstraint {
+                    elem: self.elem,
+                    list: list.into_owned(),
+                    fresh: fresh.into_owned(),
+                })
+            },
+        }
+    }
+
+    fn relevant(&self, proxy: &VarMap) -> bool {
+        proxy.contains_key(&self.elem.untyped())
+            || self.list.iter().any(|x| proxy.contains_key(x))
+            || self.fresh.iter().any(|x| proxy.contains_key(x))
+    }
+    fn update_vars(&mut self, proxy: &State) {
+        proxy.update_var(self.elem.untyped_mut());
+        for elem in self.list.iter_mut() {
+            proxy.update_var(elem);
+        }
+        for elem in self.fresh.iter_mut() {
+            proxy.update_var(elem);
+        }
     }
 }

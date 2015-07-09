@@ -1,4 +1,4 @@
-use core::{ToVar, StateProxy, VarWrapper, Var, Unifier, VarStore, UnifyResult};
+use core::{ToVar, StateProxy, VarWrapper, Var, Unifier, VarStore, UnifyResult, UntypedVar};
 use std::rc::Rc;
 use std::marker::PhantomData;
 use list::List;
@@ -90,7 +90,7 @@ value_wrapper!(&'static A, A: PartialEq);
 //value_wrapper!(&'static [A], A: PartialEq);
 
 macro_rules! tuple_wrapper {
-    (($($param:ident $arg:ident),*)) => {
+    (($($param:ident $arg:ident),*): $equiv:ty) => {
         impl<$($param,)*> ToVar for ($($param,)*) where $($param: ToVar,)* {
             type VarType = ($(Var<<$param as ToVar>::VarType>,)*);
             #[allow(non_snake_case)]
@@ -109,14 +109,19 @@ macro_rules! tuple_wrapper {
                 $(.unify_vars($param, $arg))*
                 .ok().into()
             }
+
+            fn var_iter<'a>(&'a self) -> Option<Box<Iterator<Item=UntypedVar> + 'a>> {
+                let cast: &'a $equiv = unsafe { ::std::mem::transmute(self) };
+                Some(Box::new(cast.iter().map(|x| *x)))
+            }
         }
     }
 }
 
-tuple_wrapper!((A a, B b));
-tuple_wrapper!((A a, B b, C c));
-tuple_wrapper!((A a, B b, C c, D d));
-tuple_wrapper!((A a, B b, C c, D d, E e));
+tuple_wrapper!((A a, B b): [UntypedVar; 2]);
+tuple_wrapper!((A a, B b, C c): [UntypedVar; 3]);
+tuple_wrapper!((A a, B b, C c, D d): [UntypedVar; 4]);
+tuple_wrapper!((A a, B b, C c, D d, E e): [UntypedVar; 5]);
 
 impl<A> VarWrapper for Option<Var<A>> where A: ToVar {
     fn unify_with(&self, other: &VarWrapper, state: &mut StateProxy) -> UnifyResult {
@@ -126,6 +131,12 @@ impl<A> VarWrapper for Option<Var<A>> where A: ToVar {
             (&Some(a), &Some(b)) => state.unify_vars(a, b).ok(),
             _ => false,
         }).into()
+    }
+    fn var_iter<'a>(&'a self) -> Option<Box<Iterator<Item=UntypedVar> + 'a>> {
+        match self {
+            &Some(..) => Some(Box::new(self.iter().map(|x| x.untyped())) ),
+            &None => None,
+        }
     }
 }
 
@@ -145,6 +156,12 @@ impl<A, B> VarWrapper for Result<Var<A>, Var<B>> where A: ToVar, B: ToVar {
             (&Err(a), &Err(b)) => state.unify_vars(a, b).ok(),
             _ => false,
         }).into()
+    }
+    fn var_iter<'a>(&'a self) -> Option<Box<Iterator<Item=UntypedVar> + 'a>> {
+        match self {
+            &Ok(ref x) => Some(Box::new(::std::slice::ref_slice(x).iter().map(|x| x.untyped()))),
+            &Err(ref x) => Some(Box::new(::std::slice::ref_slice(x).iter().map(|x| x.untyped()))),
+        }
     }
 }
 
