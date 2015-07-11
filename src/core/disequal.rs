@@ -41,12 +41,14 @@ impl Debug for Disequal {
     }
 }
 
-impl Disequal {
-    pub fn new<A, B, C>(a: A, b: B) -> ToDisequal<A, B, C>
-    where A: ToVar<VarType=C>, B: ToVar<VarType=C>, C: ToVar {
+impl<A, B, C> ToDisequal<A, B, C>
+where A: ToVar<VarType=C>, B: ToVar<VarType=C>, C: ToVar {
+    pub fn new(a: A, b: B) -> ToDisequal<A, B, C> {
         ToDisequal { a: a, b: b }
     }
+}
 
+impl Disequal {
     fn new_empty() -> Disequal {
         Disequal { pairs: Vec::new() }
     }
@@ -67,7 +69,7 @@ impl Disequal {
             }
         });
         if needs_update {
-            println!("updating vars for {:?}", self);
+            //println!("updating vars for {:?}", self);
             let pairs = self.pairs.iter().map(|&(olda, oldb, ty)| {
                 let a = match state.eqs.get(&olda) {
                     Some(&EqualTo(x)) => x,
@@ -77,7 +79,7 @@ impl Disequal {
                     Some(&EqualTo(x)) => x,
                     _ => oldb,
                 };
-                println!("replacing {:?} != {:?} with {:?} != {:?}", olda, oldb, a, b);
+                //println!("replacing {:?} != {:?} with {:?} != {:?}", olda, oldb, a, b);
                 (a, b, ty)
             });
             Updated(Disequal { pairs: pairs.collect() })
@@ -87,20 +89,20 @@ impl Disequal {
     }
     fn relevant(&self, var: UntypedVar) -> bool {
         let ret = self.pairs.iter().any(|&(a, b, _)| a == var || b == var);
-        println!("{:?} relevant to {:?}: {}", var, self, ret);
+        //println!("{:?} relevant to {:?}: {}", var, self, ret);
         ret
     }
     fn perform_test(&self, proxy: &mut StateProxy) -> ConstraintResult<Disequal> {
-        println!("updating {:?}", self);
+        //println!("updating {:?}", self);
         for &(a, b, ty) in self.pairs.iter() {
             proxy.untyped_unify(a, b, ty);
             if !proxy.ok() {
-                println!("failed unification, disequality constraint satisfied");
+                //println!("failed unification, disequality constraint satisfied");
                 return Irrelevant;
             }
         }
         if proxy.parent.proxy_eqs.is_empty() {
-            println!("succeeded unification with no additions, disequality constraint failed");
+            //println!("succeeded unification with no additions, disequality constraint failed");
             return Failed;
         }
 
@@ -122,11 +124,11 @@ impl Disequal {
             updated.pairs.push((k, eqvar, newtype));
         }
         if all_unchanged {
-            println!("returning disequal {:?} unchanged", self);
+            //println!("returning disequal {:?} unchanged", self);
             return self.disequal_update_vars(proxy.parent)
         }
 
-        println!("returning updated disequal {:?}", updated);
+        //println!("returning updated disequal {:?}", updated);
         return Updated(updated);
     }
 }

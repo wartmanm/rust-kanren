@@ -487,7 +487,13 @@ fn check_unify(state: &mut StateProxy, list: &mut Cow<Vec<UntypedVar>>, elem: Un
     while let Some(&var) = list.get(i) {
         match state.are_vars_unified_untyped(var, elem) {
             Impossible => { list.to_mut().swap_remove(i); },
-            Possible => { i += 1; },
+            Possible => {
+                if state.get_untyped(var).is_some() && state.get_untyped(elem).is_some() {
+                    return false;
+                } else {
+                    i += 1;
+                }
+            },
             AlreadyDone => { return false; }
         }
     }
@@ -502,14 +508,12 @@ impl<A> Constraint for VarAbsentConstraint<A> where A: ToVar {
 
         let mut list = Cow::Borrowed(&self.list);
         let mut fresh = Cow::Borrowed(&self.fresh);
+        //println!("started, proxy ok: {}", state.ok());
         push_tail(&mut list, &mut fresh, state);
+        //println!("push_tail, proxy ok: {}", state.ok());
         if !check_unify(state, &mut list, self.elem.untyped()) {
             return ConstraintResult::Failed;
         }
-        if !check_unify(state, &mut fresh, self.elem.untyped()) {
-            return ConstraintResult::Failed;
-        }
-
         if fresh.is_empty() && list.is_empty() {
             return ConstraintResult::Irrelevant;
         }

@@ -466,7 +466,7 @@ impl State {
             };
             // get updated condition
             let retconstraint = match result {
-                Failed => { self.fail(); self.restore_proxy(); return false; }
+                Failed => { self.restore_proxy(); self.fail(); return false; }
                 Irrelevant => None,
                 Unchanged => Some(constraint),
                 Updated(x) => Some(Rc::new(x)),
@@ -511,6 +511,7 @@ impl State {
     }
     fn restore_proxy(&mut self) {
         self.proxy_eqs.clear();
+        self.proxy_eqs.ok = self.eqs.ok;
     }
 
     pub fn are_vars_unified<A>(&mut self, a: Var<A>, b: Var<A>) -> Unifiability where A: ToVar {
