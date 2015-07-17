@@ -484,6 +484,9 @@ impl State {
     }
 
     pub fn add_constraint<A>(&mut self, a: A) where A: ToConstraint {
+        if !self.ok() {
+            return;
+        }
         let a = a.into_constraint(self);
         let constraint: RcConstraint = Rc::new(Box::new(ConstraintWrapper(a)));
         //let constraint: Rc<Box<Constraint>> = Rc::new(Box::new(a));
