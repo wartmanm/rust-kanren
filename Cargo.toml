@@ -6,3 +6,7 @@ authors = [ "wartman4404 <wartman4404@my.mstc.edu>" ]
 [lib]
 name = "kanren"
 path = "src/lib.rs"
+
+[profile.release]
+debug=true
+debug-assertions=false
