@@ -41,6 +41,7 @@ pub struct State {
 
 ///! StateProxy is used to identify and include or roll back the substitutions added during
 ///! unification, which is necessary for constraints.
+#[derive(Debug)]
 pub struct StateProxy<'a> {
     parent: &'a mut State,
 }
@@ -240,6 +241,24 @@ trait FollowRef {
     fn get_exact_val_opt<A>(&self, id: UntypedVar) -> Option<&A> where A: ToVar {
         self.get_exact_val(id).opt().map(|x| x.get_wrapped_value())
     }
+
+    fn occurs_check(&self, elem: UntypedVar, list: UntypedVar) -> bool
+    where Self: Sized + VarRetrieve {
+        fn occurs_check_inner<U: FollowRef+VarRetrieve>(state: &U, elem: UntypedVar, list: UntypedVar) -> bool {
+            let list = state.follow_id(list);
+            if elem == list {
+                true
+            } else {
+                if let Some(mut iter) = state.get_untyped(list).and_then(|x| x.var_iter()) {
+                    iter.any(|x| occurs_check_inner(state, elem, x))
+                } else {
+                    false
+                }
+            }
+        }
+        let elem = self.follow_id(elem);
+        occurs_check_inner(self, elem, list)
+    }
 }
 
 ///! Holds the final value of a walked variable.  Fresh is used for unset variables; it doesn't have
@@ -272,6 +291,22 @@ pub struct VarMap {
     id: UntypedVar,
     eqs: Vec<(UntypedVar, VarRef)>,
     ok: bool,
+}
+
+impl Clone for VarMap {
+    fn clone(&self) -> VarMap {
+        let new_eqs = self.iter().map(|&(k, ref v)| {
+            let v = match *v {
+                EqualTo(x) => EqualTo(x),
+                Exactly(Fresh, t) => Exactly(Fresh, t),
+                Exactly(Value(ref other), t) => {
+                    Exactly(Value(other.clone_boxed()), t)
+                },
+            };
+            (k, v)
+        }).collect();
+        VarMap { id: self.id, eqs: new_eqs, ok: self.ok }
+    }
 }
 
 #[derive(Clone)]
@@ -381,6 +416,7 @@ impl Unifier for State {
 }
 
 impl State {
+
     ///! Create a State with no substitutions and no parent.
     pub fn new() -> State {
         State {
@@ -650,6 +686,11 @@ impl<'a> StateProxy<'a> {
                 return ok;
             },
         };
+        if self.occurs_check(eq_dst, eq_src) {
+            self.fail();
+            return false;
+        }
+
         let src_val: VarRef = match src_val {
             ValuePtr(x) => unsafe {
                 let x = &*x;
@@ -854,6 +895,14 @@ impl Debug for State {
         try!(writeln!(fmt, "State {{"));
         try!(writeln!(fmt, "\tid: {:?}", self.eqs.id));
         try!(writeln!(fmt, "\tok: {:?}", self.eqs.ok));
+        try!(writeln!(fmt, "\tproxy.id: {:?}", self.proxy_eqs.id));
+        try!(writeln!(fmt, "\tproxy.ok: {:?}", self.proxy_eqs.ok));
+        try!(writeln!(fmt, "\tproxy.eqs: {{"));
+        for &(k, ref v) in self.proxy_eqs.iter() {
+            try!(write!(fmt, "\t\t{:?} => {:?}", k, v));
+        }
+        try!(writeln!(fmt, "\t}}"));
+
         try!(writeln!(fmt, "\teqs: {{"));
         let mut seen_vars = HashSet::new();
         let mut state = self;

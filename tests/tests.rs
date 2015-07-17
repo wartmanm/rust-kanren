@@ -522,3 +522,26 @@ fn fd_value_test() {
         (2, 3), (2, 4), (2, 5)
     ]);
 }
+
+#[test]
+fn occurs_check_test() {
+    let mut state = State::new();
+    fresh!(state, dupe);
+    let list1 = state.make_var_of(Pair(1i32, dupe));
+    let list2 = state.make_var_of(Pair(1, Pair(2, Pair(3, Pair(4, dupe)))));
+    state.unify(list1, list2);
+    if state.ok() {
+        let mut contents = Vec::new();
+        let mut node = list1;
+        for _ in (1..10) {
+            let (h, t) = match state.get_value(node).unwrap() {
+                &List::Pair(h, t) => (h, t),
+                _ => panic!(),
+            };
+            node = t;
+            contents.push(state.get_value(h).unwrap().clone());
+        }
+        println!("{:?}", contents);
+    }
+    assert!(!state.ok());
+}
