@@ -739,6 +739,9 @@ impl VarMap {
         UntypedVar(id)
     }
     fn get(&self, id: &UntypedVar) -> Option<&VarRef> {
+        if self.eqs.get(0).map(|&(x, _)| *id < x).unwrap_or(true) {
+            return None;
+        }
         match self.eqs.binary_search_by(|&(ref var, _)| var.cmp(id)) {
             Ok(x) => Some(&self.eqs[x].1),
             Err(_) => None,
