@@ -3,10 +3,9 @@ extern crate kanren;
 
 use kanren::core::{State, Var, Unifier, VarStore, VarRetrieve, VarMap};
 use kanren::core::vars::__;
-use kanren::core::disequal::Disequal;
 use kanren::core::get_values::assign_all_values;
 use kanren::finitedomain::{Fd, fd_values};
-use kanren::constraints::{SumConstraint, FdLessOrEqual, AllDiffConstraint};
+use kanren::constraints::{SumConstraint, FdLessOrEqual, AllDiffConstraint, Disequal};
 use kanren::core::{Constraint, ToConstraint, ConstraintResult, StateProxy, UntypedVar};
 use std::fmt::{self, Write, Debug, Formatter};
 use kanren::iter::{single, IterBuilder, VarIter, StateIterExt};
