@@ -209,6 +209,12 @@ pub trait VarWrapper : Debug + 'static + Any + VarWrapperClone {
     ///! disables an optimization that's incorrect in such a case.
     fn uses_overwrite(&self) -> bool { false }
     fn var_iter<'a>(&'a self) -> Option<Box<Iterator<Item=UntypedVar> + 'a>> { None }
+    fn occurs_check(&self, state: &StateProxy, other: UntypedVar) -> bool {
+        match self.var_iter() {
+            Some(mut iter) => iter.any(|x| state.occurs_check(other, x)),
+            None => false
+        }
+    }
 }
 
 trait FollowRef {
@@ -240,24 +246,6 @@ trait FollowRef {
 
     fn get_exact_val_opt<A>(&self, id: UntypedVar) -> Option<&A> where A: ToVar {
         self.get_exact_val(id).opt().map(|x| x.get_wrapped_value())
-    }
-
-    fn occurs_check(&self, elem: UntypedVar, list: UntypedVar) -> bool
-    where Self: Sized + VarRetrieve {
-        fn occurs_check_inner<U: FollowRef+VarRetrieve>(state: &U, elem: UntypedVar, list: UntypedVar) -> bool {
-            let list = state.follow_id(list);
-            if elem == list {
-                true
-            } else {
-                if let Some(mut iter) = state.get_untyped(list).and_then(|x| x.var_iter()) {
-                    iter.any(|x| occurs_check_inner(state, elem, x))
-                } else {
-                    false
-                }
-            }
-        }
-        let elem = self.follow_id(elem);
-        occurs_check_inner(self, elem, list)
     }
 }
 
@@ -567,6 +555,15 @@ impl State {
         self.restore_proxy();
         result
     }
+    pub fn occurs_check(&mut self, elem: UntypedVar, list: UntypedVar) -> bool {
+        // TODO: this does not require &mut self in any way except that that's what StateProxy
+        // requires, and VarWrapper::occurs_check can't be generic.
+        // This is probably not fixable without finding a better approach for what StateProxy
+        // currently does.
+        let elem = self.follow_id(elem);
+        let proxy = StateProxy::new(self);
+        proxy.occurs_check(elem, list)
+    }
 }
 
 #[derive(Eq, PartialEq, Copy, Clone)]
@@ -686,7 +683,7 @@ impl<'a> StateProxy<'a> {
                 return ok;
             },
         };
-        if self.occurs_check(eq_dst, eq_src) {
+        if self.occurs_check_nofollow(eq_dst, eq_src) {
             self.fail();
             return false;
         }
@@ -704,12 +701,7 @@ impl<'a> StateProxy<'a> {
         true
     }
 
-    pub fn get_updated_var(&self, var: UntypedVar) -> UntypedVar {
-        match self.parent.proxy_eqs.get(&var) {
-            Some(&EqualTo(x)) => x,
-            _ => var
-        }
-    }
+    pub fn get_updated_var(&self, var: UntypedVar) -> UntypedVar { self.follow_id(var) }
 
     pub fn get_changed_value<A>(&self, a: Var<A>) -> Option<&A> where A : ToVar {
         let mut id = a.var;
@@ -755,6 +747,23 @@ impl<'a> StateProxy<'a> {
     //pub fn get_child_vars(&self, var: UntypedVar) -> Option<VarCollectionIter> {
         //self.get_exact_val(var).opt().map(|x| x.var_iter(self))
     //}
+
+    #[inline(always)]
+    pub fn occurs_check(&self, elem: UntypedVar, list: UntypedVar) -> bool {
+        let list = self.follow_id(list);
+        self.occurs_check_nofollow(elem, list)
+    }
+
+    fn occurs_check_nofollow(&self, elem: UntypedVar, list: UntypedVar) -> bool {
+        if elem == list {
+            true
+        } else {
+            match self.get_untyped(list) {
+                Some(listvar) => listvar.occurs_check(self, elem),
+                None => false,
+            }
+        }
+    }
 }
 
 pub type VarCollectionIter<'a> = Box<Iterator<Item=UntypedVar> + 'a>;

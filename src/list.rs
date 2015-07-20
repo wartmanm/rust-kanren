@@ -68,6 +68,23 @@ where A : ToVar {
             &Nil => None,
         }
     }
+    fn occurs_check(&self, state: &StateProxy, other: UntypedVar) -> bool {
+        let mut list = self;
+        loop {
+            match list {
+                &Nil => { return false },
+                &VarPair(a, b) => {
+                    if state.occurs_check(other, a.untyped()) { return true; }
+                    let b = state.get_updated_var(b.untyped());
+                    if b == other { return true; }
+                    match state.get_untyped(b) {
+                        Some(tail) => { list = tail.get_wrapped_value(); }
+                        None => { return false; }
+                    }
+                }
+            }
+        }
+    }
 }
 
 struct PairIter {

@@ -114,6 +114,14 @@ macro_rules! tuple_wrapper {
                 let cast: &'a $equiv = unsafe { ::std::mem::transmute(self) };
                 Some(Box::new(cast.iter().map(|x| *x)))
             }
+
+            fn occurs_check(&self, state: &StateProxy, other: UntypedVar) -> bool {
+                let cast: & $equiv = unsafe { ::std::mem::transmute(self) };
+                cast.iter().any(|&x| {
+                    if (x == other) { true }
+                    else { state.occurs_check(other, x) }
+                })
+            }
         }
     }
 }
@@ -136,6 +144,12 @@ impl<A> VarWrapper for Option<Var<A>> where A: ToVar {
         match self {
             &Some(..) => Some(Box::new(self.iter().map(|x| x.untyped())) ),
             &None => None,
+        }
+    }
+    fn occurs_check(&self, state: &StateProxy, other: UntypedVar) -> bool {
+        match self {
+            &None => false,
+            &Some(a) => state.occurs_check(other, a.untyped()),
         }
     }
 }
@@ -162,6 +176,13 @@ impl<A, B> VarWrapper for Result<Var<A>, Var<B>> where A: ToVar, B: ToVar {
             &Ok(ref x) => Some(Box::new(::std::slice::ref_slice(x).iter().map(|x| x.untyped()))),
             &Err(ref x) => Some(Box::new(::std::slice::ref_slice(x).iter().map(|x| x.untyped()))),
         }
+    }
+    fn occurs_check(&self, state: &StateProxy, other: UntypedVar) -> bool {
+        let selfvar = match self {
+            &Ok(x) => x.untyped(),
+            &Err(x) => x.untyped(),
+        };
+        state.occurs_check(other, selfvar)
     }
 }
 
