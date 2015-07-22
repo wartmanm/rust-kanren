@@ -7,8 +7,6 @@
 
 #[macro_use]
 pub mod macros;
-///! Contains the definition of `TailIterator`.
-pub mod tailiter;
 ///! Contains `State`, which performs unification, and `Var`, the variable type it operates on.
 #[macro_use]
 pub mod core;

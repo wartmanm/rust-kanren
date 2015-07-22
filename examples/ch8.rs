@@ -109,7 +109,7 @@ where D: ToVar<VarType=Bit>, N: ToVar<VarType=List<Bit>>, M: ToVar<VarType=List<
     let n = state.make_var_of(n);
     let m = state.make_var_of(m);
     let r = state.make_var_of(r);
-    condi!(state, {
+    conde!(state, {
         state.unify(Zero, d).unify(Nil, m).unify(n,r);
         state
     }, {
@@ -153,7 +153,7 @@ fn gen_adder(mut state: State, d: Var<Bit>, n: Var<List<Bit>>, m: Var<List<Bit>>
     pos(&mut state, z);
     single(state)
         .and(move |state| full_adder(state, d, a, b, c, e))
-        .flat_imap(move |state| adder(state, e, x, y, z))
+        .and(move |state| adder(state, e, x, y, z))
 }
 
 fn plus(mut state: State, n: Var<List<Bit>>, m: Var<List<Bit>>, k: Var<List<Bit>>) -> StateIter {
@@ -162,7 +162,7 @@ fn plus(mut state: State, n: Var<List<Bit>>, m: Var<List<Bit>>, k: Var<List<Bit>
 }
 
 fn multiply(state: State, n: Var<List<Bit>>, m: Var<List<Bit>>, p: Var<List<Bit>>) -> StateIter {
-    condi!(state, {
+    conde!(state, {
         state.unify(Nil, n).unify(Nil, p);
         state
     }, {
@@ -218,7 +218,7 @@ fn bound_multiply(state: State, q: Var<List<Bit>>, p: Var<List<Bit>>, n: Var<Lis
     }, {
         fresh!(state, x, y, z);
         state.unify(Pair(__(), x), q).unify(Pair(__(), y), p);
-        condi!(state, {
+        conde!(state, {
             fresh!(state, nil);
             state.unify(Nil, n).unify(Pair(__(), z), m).unify(Nil, nil);
             bound_multiply(state, x, y, z, nil)
@@ -233,7 +233,7 @@ fn five() {
     let mut state = State::new();
     fresh!(state, n, m);
     let five_num = build_num(&mut state, 5);
-    for state in plus(state, n, m, five_num) {
+    for state in plus(state, n, m, five_num).into_iter() {
         let mut reifier = Reifier::new(&state);
         println!("{} + {} = 5", reify_list(&state, &mut reifier, n), reify_list(&state, &mut reifier, m));
     }

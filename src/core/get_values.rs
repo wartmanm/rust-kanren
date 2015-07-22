@@ -6,9 +6,7 @@ use std::rc::Rc;
 use core::{UntypedVar, State, FollowRef, VarWrapper, Unifier, ExactVal};
 use core::VarRef::*;
 use core::ExactVal::*;
-use iter::{StateIter, single};
-use tailiter::{TailIterItem, TailIterator, TailIterHolder};
-use tailiter::TailIterItem::*;
+use iter::{StateIter, single, TailIter};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 struct CountedVar(UntypedVar, usize);
@@ -27,30 +25,19 @@ impl PartialOrd for CountedVar {
 }
 
 type VarWrapperIter = Box<Iterator<Item=Box<VarWrapper>>>;
-pub struct ValueIter {
-    state: Rc<State>,
-    iter: VarWrapperIter,
-    var: UntypedVar,
-}
 
-impl TailIterator for ValueIter {
-    type Item = State;
-    fn next_inner(&mut self) -> TailIterItem<State> {
-        while let Some(x) = self.iter.next() {
-            let mut child = State::with_parent(self.state.clone());
+fn value_iter(state: Rc<State>, var: UntypedVar, mut iter: VarWrapperIter) -> TailIter {
+    use iter::TailIterResult::*;
+    Box::new(move || {
+        while let Some(x) = iter.next() {
+            let mut child = State::with_parent(state.clone());
             let tid = x.get_type_id();
             let newid = child.eqs.store_value_untyped(Value(x), tid);
-            child.untyped_unify(newid, self.var, tid);
-            if child.ok() { return SingleItem(child); }
+            child.untyped_unify(newid, var, tid);
+            if child.ok() { return More(child, value_iter(state, var, iter)); }
         }
-        Done
-    }
-}
-
-impl ValueIter {
-    fn new(state: State, var: UntypedVar, iter: VarWrapperIter) -> ValueIter {
-        ValueIter { state: Rc::new(state), iter: iter, var: var }
-    }
+        return Nothing;
+    })
 }
 
 struct ParentStateIter<'a> {
@@ -124,6 +111,7 @@ pub fn assign_values<I>(state: State, in_vars: I) -> StateIter where I: IntoIter
 }
 
 fn assign_values_inner(state: State, mut counted: BTreeSet<CountedVar>, mut vars: HashMap<UntypedVar, usize>) -> StateIter {
+    use iter::TailIterResult::Wrapped;
     let var = match counted.iter().next() {
         Some(x) => *x,
         None => { return single(state) },
@@ -149,7 +137,7 @@ fn assign_values_inner(state: State, mut counted: BTreeSet<CountedVar>, mut vars
         Some(x) => x,
         None => { return assign_values_inner(state, counted, vars); },
     };
-    let iter = TailIterHolder::new(ValueIter::new(state, var.0, val));
+    let iter = Wrapped(value_iter(Rc::new(state), var.0, val));
     
     iter
     .and(move |state| {

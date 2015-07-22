@@ -14,6 +14,8 @@ use kanren::list::{Pair, Nil};
 use kanren::builtins::{index, length, contains};
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::collections::HashSet;
+use std::iter::FromIterator;
 
 #[test]
 fn many_vars() {
@@ -149,10 +151,14 @@ fn joined_condes() {
         let b = *s.get_value(varb).unwrap();
         (a, b)
     }).collect();
-    assert!(items == vec![
+    for item in items.iter() {
+        println!("{:?}", item);
+    }
+    let hashitems: HashSet<(i32, i32)> = HashSet::from_iter(items.clone());
+    assert!(hashitems == HashSet::from_iter(vec![
         (1, 1), (1, 2), (1, 3),
         (2, 1), (2, 2), (2, 3),
-        (3, 1), (3, 2), (3, 3)]
+        (3, 1), (3, 2), (3, 3)])
     );
 }
 
@@ -251,12 +257,13 @@ fn disequal_onelist() {
     let items: Vec<(i32, i32)> = states.map(|state| {
         (*state.get_value(a).unwrap(), *state.get_value(b).unwrap())
     }).collect();
+    let hashitems: HashSet<(i32, i32)> = HashSet::from_iter(items.clone());
     println!("{:?}", items);
-    assert!(items == [
+    assert!(hashitems == HashSet::from_iter(vec![
         (1, 2), (1, 3),
         (2, 1), (2, 3),
         (3, 1), (3, 2)
-    ]);
+    ]));
 }
 
 
@@ -516,11 +523,15 @@ fn fd_value_test() {
         println!("{:?}, {:?}", fval, f2val);
         (fval.unwrap().single_value().unwrap(), f2val.unwrap().single_value().unwrap())
     }).collect();
-    assert!(result == vec![
+    for item in result.iter() {
+        println!("{:?}", item);
+    }
+    let hashitems: HashSet<(usize, usize)> = HashSet::from_iter(result.clone());
+    assert!(hashitems == HashSet::from_iter(vec![
         (0, 3), (0, 4), (0, 5),
         (1, 3), (1, 4), (1, 5),
         (2, 3), (2, 4), (2, 5)
-    ]);
+    ]));
 }
 
 #[test]

@@ -2,9 +2,8 @@ use finitedomain::Fd::*;
 use std::collections::HashSet;
 use core::{VarWrapper, StateProxy, Var, ToVar, VarStore, VarRetrieve, State, Unifier, UnifyResult};
 use iter::{StateIter, single};
-use tailiter::TailIterItem::*;
-use tailiter::{TailIterItem, TailIterator, TailIterHolder};
 use std::rc::Rc;
+use iter::{TailIter, TailIterResult};
 
 ///! Represents a finite-domain value.  By storing a set of possible values from that domain, these
 ///! can be more performant than backtracking for each value.
@@ -195,30 +194,35 @@ where A: ToVar<VarType=Fd>, B: ToVar<VarType=usize> {
         None => { single(state) },
         Some(Values(values)) => {
             let valiter = values.into_iter();
-            TailIterHolder::new(
-                FdValueIter { state: Some(Rc::new(state)), fd: fd, vals: valiter, u: u })
+            TailIterResult::Wrapped(fd_value_iter(Rc::new(state), fd, valiter, u))
         }
     }
 }
 
-struct FdValueIter {
-    state: Option<Rc<State>>,
-    fd: Var<Fd>,
-    vals: ::std::vec::IntoIter<usize>,
-    u: Var<usize>,
+fn fd_value_iter(state: Rc<State>, fd: Var<Fd>, mut vals: ::std::vec::IntoIter<usize>, u: Var<usize>) -> TailIter {
+    use iter::TailIterResult::*;
+    Box::new(move || {
+        while let Some(x) = vals.next() {
+            let mut child = State::with_parent(state.clone());
+            child.unify(x, u);
+            child.unify(Single(x), fd);
+            if child.ok() { return More(child, fd_value_iter(state, fd, vals, u)); }
+        }
+        return Nothing;
+    })
 }
 
-impl TailIterator for FdValueIter {
-    type Item = State;
-    fn next_inner(&mut self) -> TailIterItem<State> {
-        while let Some(x) = self.vals.next() {
-            let mut child = State::with_parent(self.state.clone().unwrap());
-            //println!("fdvalueiter: unifying {} with {:?} and {:?}, {} remain",
-                     //x, child.get_value(self.fd), child.get_value(self.u), self.vals.len());
-            child.unify(x, self.u);
-            child.unify(Single(x), self.fd);
-            if child.ok() { return SingleItem(child); }
-        }
-        return Done;
-    }
-}
+//impl TailIterator for FdValueIter {
+    //type Item = State;
+    //fn next_inner(&mut self) -> TailIterItem<State> {
+        //while let Some(x) = self.vals.next() {
+            //let mut child = State::with_parent(self.state.clone().unwrap());
+            ////println!("fdvalueiter: unifying {} with {:?} and {:?}, {} remain",
+                     ////x, child.get_value(self.fd), child.get_value(self.u), self.vals.len());
+            //child.unify(x, self.u);
+            //child.unify(Single(x), self.fd);
+            //if child.ok() { return SingleItem(child); }
+        //}
+        //return Done;
+    //}
+//}

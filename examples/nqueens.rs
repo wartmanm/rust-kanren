@@ -89,7 +89,7 @@ pub fn main() {
     if let Some(firstarg) = firstarg {
         state.unify(n, firstarg as i32);
     }
-    for state in nqueens(state, n, queens) {
+    for state in nqueens(state, n, queens).into_iter() {
         let n = *state.get_value(n).unwrap();
         for q in state.get_value(queens).unwrap().iter(&state) {
             let (x,y,_,_) = *q.unwrap();

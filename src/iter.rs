@@ -1,224 +1,137 @@
 use core::{ToVar, State, Var, Unifier, VarRetrieve};
 use std::rc::Rc;
 use std::boxed::FnBox;
-use tailiter::{TailIterator, TailIterHolder, TailIterItem};
-use tailiter::TailIterItem::*;
+use iter::TailIterResult::*;
 use std::marker::PhantomData;
 
-pub type StateIter = TailIterHolder<State>;
+pub fn single(s: State) -> TailIterResult { s.into() }
+pub fn none() -> TailIterResult { Nothing }
 
-struct SingleIter {
-    state: Option<State>,
+pub enum TailIterResult {
+    Nothing,
+    Last(State),
+    Wrapped(TailIter),
+    More(State, TailIter),
 }
 
-///! Transforms a state into a `TailIterator` which returns that state.
-pub fn single(state: State) -> StateIter {
-    let state = match state.ok() {
-        true => Some(state),
-        false => None,
-    };
-    TailIterHolder::new(SingleIter { state: state })
-}
+pub struct TailIterIter(TailIterResult);
 
-impl TailIterator for SingleIter {
+impl Iterator for TailIterIter {
     type Item = State;
-    fn next_inner(&mut self) -> TailIterItem<State> {
-        self.state.take().map(SingleItem).unwrap_or(Done)
+    fn next(&mut self) -> Option<State> {
+        self.0.next_boxed()
     }
 }
 
-///! Creates a `TailIterator` which returns no states at all.
-pub fn none() -> StateIter { TailIterHolder::new(NoneIter) }
+pub type TailIter = Box<FnBox() -> TailIterResult + 'static>;
 
-struct NoneIter;
-
-impl TailIterator for NoneIter {
-    type Item = State;
-    fn next_inner(&mut self) -> TailIterItem<State> { Done }
+impl TailIterResult {
+    pub fn chain(self, other: TailIter) -> TailIterResult {
+        match self {
+            Nothing => other(),
+            Wrapped(x) => Wrapped(Box::new(move || other().chain(x))),
+            Last(x) => More(x, other),
+            More(s, more) => More(s, Box::new(move || other().chain(more))),
+        }
+    }
+    pub fn and<F, S>(self, f: F) -> TailIterResult
+    where F: Fn(State) -> S + 'static, S: Into<TailIterResult> {
+        match self {
+            Nothing => Nothing,
+            Wrapped(x) => Wrapped(Box::new(move || x().and(f))),
+            Last(x) => f(x).into(),
+            More(s, more) => f(s).into().chain(Box::new(move || more().and(f))),
+        }
+    }
+    pub fn flat_map<F>(self, f: F) -> TailIterResult
+    where F: Fn(State) -> TailIterResult + 'static {
+        self.and(f)
+    }
+    pub fn into_iter(self) -> TailIterIter { TailIterIter(self) }
+    pub fn next_boxed(&mut self) -> Option<State> {
+        let mut tmp = Nothing;
+        ::std::mem::swap(&mut tmp, self);
+        match tmp {
+            Nothing => None,
+            Last(x) => Some(x),
+            Wrapped(x) => {
+                *self = x();
+                self.next_boxed()
+            },
+            More(s, more) => {
+                *self = Wrapped(more);
+                Some(s)
+            }
+        }
+    }
 }
 
-struct CondeIter {
-    fns: ::std::vec::IntoIter<WrappedStateIter>,
-    current: Option<StateIter>,
-    state: Option<Rc<State>>,
+pub type StateIter = TailIterResult;
+
+impl IterBuilder {
+    //pub fn get_fns(self) -> Vec<Box<FnBox(State) -> StateIter + 'static>> { self.fns }
+    pub fn new() -> IterBuilder {
+        IterBuilder { fns: Vec::new() }
+    }
+    pub fn push<F, J>(&mut self, f: F)
+    where F: Fn(State) -> J + 'static, J: Into<StateIter> + 'static {
+        self.fns.push(Box::new(move |state| f(state).into()));
+    }
+
+    pub fn conde(self, state: State) -> StateIter {
+        if !state.ok() { return Nothing; }
+        //let state = Rc::new(state);
+        let mut iter = self.fns.into_iter().rev();
+        let state = Rc::new(state);
+        //let last = Last(state);
+        let initstate = State::with_parent(state.clone());
+        let initfn = iter.next().unwrap();
+        let last = Wrapped(Box::new(move || initfn(initstate)));
+        let chained = iter.fold(last, |accum, f| {
+            let child_state = State::with_parent(state.clone());
+            let mapped = Box::new(move || f(child_state));
+            accum.chain(mapped)
+        });
+        chained
+    }
+
+    pub fn conda(self, state: State) -> StateIter {
+        if !state.ok() { return Nothing; }
+        let state = Rc::new(state);
+        let mut iter = self.fns.into_iter();
+        
+        Wrapped(Box::new(move || {
+            while let Some(f) = iter.next() {
+                let child = State::with_parent(state.clone());
+                let mut childiter = f(child);
+                if let Some(result) = childiter.next_boxed() {
+                    return More(result, Box::new(move || childiter));
+                }
+            }
+            Nothing
+        }))
+    }
 }
 
-struct CondiIter {
-    fns: ::std::vec::IntoIter<WrappedStateIter>,
-    iters: Vec<StateIter>,
-    pos: usize,
-    state: Option<Rc<State>>,
+pub type WrappedStateIter = Box<Fn(State) -> TailIterResult + 'static>;
+
+pub struct IterBuilder {
+    fns: Vec<WrappedStateIter>,
 }
 
-struct CondaIter {
-    fns: ::std::vec::IntoIter<WrappedStateIter>,
-    current: Option<StateIter>,
-    state: Rc<State>,
-}
-
-struct ConduIter {
-    fns: ::std::vec::IntoIter<WrappedStateIter>,
-    state: Rc<State>,
-    done: bool
+impl From<State> for StateIter {
+    fn from(s: State) -> StateIter {
+        if s.ok() { Last(s) } else { Nothing }
+    }
 }
 
 ///! An iterator which retrieves the value of a variable from each state in a `StateIter`.
 pub struct VarIter<'a, A>
 where A : ToVar {
-    iter: &'a mut StateIter,
+    iter: &'a mut TailIterResult,
     var: Var<A>,
 }
 
-type WrappedStateIter = Box<FnBox(State) -> StateIter + 'static>;
-
-///! Collects `|State| -> StateIter` closures and transforms them into one of the different
-///! disjoint iterators.
-///!
-///! These are created by the `cond!()` macros, you probably don't need to create one yourself unless
-///! you want to.
-pub struct IterBuilder {
-    fns: Vec<WrappedStateIter>,
-}
-
-impl IterBuilder {
-    pub fn new() -> IterBuilder {
-        IterBuilder { fns: Vec::new() }
-    }
-    pub fn push<F, J>(&mut self, f: F)
-    where F: FnOnce(State) -> J + 'static, J: Into<StateIter> + 'static {
-        self.fns.push(Box::new(move |state| f(state).into()));
-    }
-
-    ///! Create a `TailIterator` which applies the provided `State` to each of its child functions in
-    ///! depth-first fashion, exhausting one before moving on to the next.
-    pub fn conde(self, state: State) -> StateIter {
-        if !state.ok() { return none(); }
-        TailIterHolder::new(CondeIter { fns: self.fns.into_iter(), current: None, state: Some(Rc::new(state)) })
-    }
-
-    ///! Create a `TailIterator` which applies the provided `State` to each of its child functions in
-    ///! breadth-first fashion, returning one value at a time from each of them.
-    pub fn condi(self, state: State) -> StateIter {
-        if !state.ok() { return none(); }
-
-        let iters = Vec::with_capacity(self.fns.len());
-        TailIterHolder::new(CondiIter { fns: self.fns.into_iter(), iters: iters, pos: 0, state: Some(Rc::new(state)) })
-    }
-
-    ///! Create a `TailIterator` which applies the provided `State` to each of its child functions,
-    ///! but only returns the values of the first one which produces any results, ignoring the
-    ///! others.
-    ///!
-    ///! In the original implementation, a precondition is to determine which child to use, which
-    ///! can then return zero or more results.  I'm not sure how to represent this, so it's not
-    ///! likely to be very useful.
-    pub fn conda(self, state: State) -> StateIter {
-        if !state.ok() { return none(); }
-        TailIterHolder::new(CondaIter { fns: self.fns.into_iter(), state: Rc::new(state), current: None })
-    }
-
-    ///! Create a `TailIterator` which applies the provided `State` to each of its child functions,
-    ///! but returns at most a single value.
-    ///!
-    ///! In the original implementation, a precondition is to determine which child to use, which
-    ///! can then return zero or more results.  I'm not sure how to represent this, so it's not
-    ///! likely to be very useful.
-    pub fn condu(self, state: State) -> StateIter {
-        if !state.ok() { return none(); }
-        TailIterHolder::new(ConduIter { fns: self.fns.into_iter(), state: Rc::new(state), done: false })
-    }
-}
-
-fn try_unwrap_state(state: Rc<State>) -> State {
-    Rc::try_unwrap(state).unwrap_or_else(State::with_parent)
-}
-
-// TODO: eliminate duplication with TailFlatMapper
-impl TailIterator for CondeIter {
-    type Item = State;
-    fn next_inner(&mut self) -> TailIterItem<State> {
-        loop {
-            if let Some(ref mut current) = self.current {
-                if let Some(x) = current.next_boxed() {
-                    return SingleItem(x);
-                }
-            }
-            let current_fn = self.fns.next().unwrap();
-            
-            if self.fns.len() == 0 {
-                let state = try_unwrap_state(self.state.take().unwrap());
-                return Tail(current_fn(state));
-            }
-
-            let state = State::with_parent(self.state.as_ref().unwrap().clone());
-            self.current = Some(current_fn(state));
-        }
-    }
-}
-
-// TODO: eliminate duplication with TailFlatIMapper
-impl TailIterator for CondiIter {
-    type Item = State;
-    fn next_inner(&mut self) -> TailIterItem<State> {
-        loop {
-            let f = self.fns.next();
-            if let Some(f) = f {
-                if self.iters.is_empty() && self.fns.len() == 0 {
-                    let state = try_unwrap_state(self.state.take().unwrap());
-                    return Tail(f(state));
-                }
-                let state = State::with_parent(self.state.as_ref().unwrap().clone());
-                self.iters.push(f(state));
-            } else if self.iters.len() == 1 {
-                return Tail(self.iters.pop().unwrap());
-            }
-            self.pos = self.pos % self.iters.len();
-            if let Some(x) = self.iters[self.pos].next_boxed() {
-                self.pos += 1;
-                return SingleItem(x);
-            }
-            self.iters.remove(self.pos);
-        }
-    }
-}
-
-impl TailIterator for CondaIter {
-    type Item = State;
-    fn next_inner(&mut self) -> TailIterItem<State> {
-        if let Some(current) = self.current.take() {
-            return Tail(current);
-        }
-        while let Some(f) = self.fns.next() {
-            let state = State::with_parent(self.state.clone());
-            let mut iter = f(state);
-            if let Some(next) = iter.next_boxed() {
-                self.current = Some(iter);
-                return SingleItem(next);
-            }
-        }
-        return Done;
-    }
-}
-
-impl TailIterator for ConduIter {
-    type Item = State;
-    fn next_inner(&mut self) -> TailIterItem<State> {
-        if self.done {
-            return Done;
-        }
-        while let Some(f) = self.fns.next() {
-            let state = State::with_parent(self.state.clone());
-            let mut iter = f(state);
-            if let Some(next) = iter.next_boxed() {
-                self.done = true;
-                return SingleItem(next);
-            }
-        }
-        return Done;
-
-    }
-}
-            
 
 impl<'a, A> Iterator for VarIter<'a, A>
 where A : ToVar + Clone {
@@ -235,10 +148,6 @@ where A : ToVar {
     }
 }
 
-impl From<State> for StateIter {
-    fn from(s: State) -> StateIter { single(s) }
-}
-
 pub trait StateIterExt {
     ///! Helper method to create `VarIter`s.
     fn var_iter<A>(&mut self, var: Var<A>) -> VarIter<A> where A: ToVar;
@@ -250,15 +159,6 @@ impl StateIterExt for StateIter {
     }
 }
 
-pub trait StateExt {
-    fn and<F, J>(self, f: F) -> StateIter where F: Fn(State) -> J + 'static, J: Into<StateIter>;
-}
-
-impl StateExt for State {
-    fn and<F, J>(self, f: F) -> StateIter where F: Fn(State) -> J + 'static, J: Into<StateIter> {
-        f(self).into()
-    }
-}
 
 ///! Helper to find all results for a given state and iterator.
 pub struct FindAll<F>
