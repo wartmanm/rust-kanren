@@ -118,7 +118,7 @@ macro_rules! tuple_wrapper {
             fn occurs_check(&self, state: &StateProxy, other: UntypedVar) -> bool {
                 let cast: & $equiv = unsafe { ::std::mem::transmute(self) };
                 cast.iter().any(|&x| {
-                    if (x == other) { true }
+                    if x == other { true }
                     else { state.occurs_check(other, x) }
                 })
             }

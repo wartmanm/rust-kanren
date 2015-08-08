@@ -6,10 +6,9 @@ extern crate test;
 use test::Bencher;
 use std::rc::Rc;
 
-use kanren::core::{State, Unifier, Var, ToVar, VarStore, VarRetrieve};
+use kanren::core::{State, Unifier, Var, ToVar, VarStore};
 use kanren::iter::{StateIter, single}; use kanren::core::vars::__;
-use kanren::core::reify::Reifier;
-use kanren::builtins::{contains, index, length};
+use kanren::builtins::contains;
 use kanren::list::{List, Pair};
 use Cigarettes::*;
 use Nationalities::*;
@@ -157,6 +156,7 @@ fn test_neighborhood(b: &mut Bencher) {
 }
 
 
+#[cfg(not(test))]
 fn main() {
     neighborhood_iter();
 }

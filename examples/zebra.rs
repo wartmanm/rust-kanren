@@ -5,7 +5,7 @@ use kanren::core::{State, Unifier, Var, ToVar, VarStore, VarRetrieve};
 use kanren::iter::{StateIter, single};
 use kanren::core::vars::__;
 use kanren::core::reify::Reifier;
-use kanren::builtins::{contains, index, length};
+use kanren::builtins::contains;
 use kanren::list::{List, Pair};
 use Cigarettes::*;
 use Nationalities::*;
