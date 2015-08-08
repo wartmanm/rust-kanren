@@ -58,11 +58,11 @@ fn bit_xor(state: State, x: Var<Bit>, y: Var<Bit>, r: Var<Bit>) -> StateIter {
 //});
 
 
-method!(half_adder(state, { args= } { vars=x: Bit, y: Bit, r: Bit, c: Bit }) {
+method!(half_adder(state, x: Bit, y: Bit, r: Bit, c: Bit) {
     bit_xor(state, x, y, r).and(move |state| bit_and(state, x, y, c))
 });
 
-method!(full_adder(state, { args= } { vars=b: Bit, x: Bit, y: Bit, r: Bit, c: Bit }) {
+method!(full_adder(state, b: Bit, x: Bit, y: Bit, r: Bit, c: Bit) {
     fresh!(state, w, xy, wz);
     half_adder(state, x, y, w, xy)
         .and(move |state| half_adder(state, w, b, r, wz))

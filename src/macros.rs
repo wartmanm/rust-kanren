@@ -43,16 +43,20 @@ macro_rules! condu {
 
 #[macro_export]
 macro_rules! method {
-    ($name:ident($state:ident, { args=$($arg:ident: $argty:ty),* } { vars=$($var:ident: $varty:ty),* }) $body:expr) => (
+    ($name:ident($state:ident, { args=$($arg:ident: $argty:ty),* $(,)* } { vars=$($var:ident: $varty:ty),* $(,)* }) $body:expr) => (
         #[allow(non_camel_case_types)]
         fn $name<$($var,)*>(mut $state: State, $($arg: $argty,)* $($var: $var,)*) -> StateIter
         where $($var: ToVar<VarType=$varty>,)* {
             use $crate::iter::StateIter;
             $(let $var = $state.make_var_of($var);)*
+            #[allow(unused_mut)]
             fn inner(mut $state: State, $($arg: $argty,)* $($var: Var<$varty>,)*) -> StateIter {
                 StateIter::from({ $body })
             }
             inner($state, $($arg,)* $($var,)*)
         }
-    )
+    );
+    ($name:ident($state:ident, $($var:ident: $varty:ty),*) $body:expr) => (
+        method!($name($state, { args= } { vars=$($var: $varty,)* }) $body);
+    );
 }
