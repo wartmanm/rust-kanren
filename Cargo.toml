@@ -1,7 +1,12 @@
-[project]
-name = "rust_kanren"
+[package]
+name = "kanren"
 version = "0.0.1"
 authors = [ "wartman4404 <wartman4404@my.mstc.edu>" ]
+description = "An implementation of most of the miniKanren logic language in Rust."
+repository = "https://github.com/wartman4404/rust-kanren"
+readme = "README.md"
+keywords = ["kanren", "miniKanren", "logic"]
+license = "Apache-2.0"
 
 [lib]
 name = "kanren"

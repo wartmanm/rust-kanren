@@ -1,4 +1,4 @@
 [root]
-name = "rust_kanren"
+name = "kanren"
 version = "0.0.1"
 
