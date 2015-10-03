@@ -1,18 +1,12 @@
 use core::{ToVar, State, Var, Unifier, VarRetrieve};
 use std::rc::Rc;
 use std::boxed::FnBox;
-use iter::TailIterResult::*;
 use std::marker::PhantomData;
 
 pub fn single(s: State) -> TailIterResult { s.into() }
-pub fn none() -> TailIterResult { Nothing }
+pub fn none() -> TailIterResult { TailIterResult(None, None) }
 
-pub enum TailIterResult {
-    Nothing,
-    Last(State),
-    Wrapped(TailIter),
-    More(State, TailIter),
-}
+pub struct TailIterResult(pub Option<State>, pub Option<TailIter>);
 
 pub struct TailIterIter(TailIterResult);
 
@@ -28,19 +22,23 @@ pub type TailIter = Box<FnBox() -> TailIterResult + 'static>;
 impl TailIterResult {
     pub fn chain(self, other: TailIter) -> TailIterResult {
         match self {
-            Nothing => other(),
-            Wrapped(x) => Wrapped(Box::new(move || other().chain(x))),
-            Last(x) => More(x, other),
-            More(s, more) => More(s, Box::new(move || other().chain(more))),
+            TailIterResult(None, None) => other(),
+            TailIterResult(None, Some(x)) => TailIterResult(None, Some(Box::new(move || {
+                other().chain(x)
+            }))),
+            TailIterResult(Some(x), None) => TailIterResult(Some(x), Some(other)),
+            TailIterResult(Some(x), Some(more)) => TailIterResult(Some(x), Some(Box::new(move || {
+                other().chain(more)
+            }))),
         }
     }
     pub fn and<F, S>(self, f: F) -> TailIterResult
     where F: Fn(State) -> S + 'static, S: Into<TailIterResult> {
         match self {
-            Nothing => Nothing,
-            Wrapped(x) => Wrapped(Box::new(move || x().and(f))),
-            Last(x) => f(x).into(),
-            More(s, more) => f(s).into().chain(Box::new(move || more().and(f))),
+            TailIterResult(None, None) => TailIterResult(None, None),
+            TailIterResult(None, Some(x)) => TailIterResult(None, Some(Box::new(move || x().and(f)))),
+            TailIterResult(Some(x), None) => f(x).into(),
+            TailIterResult(Some(x), Some(more)) => f(x).into().chain(Box::new(move || more().and(f))),
         }
     }
     pub fn flat_map<F>(self, f: F) -> TailIterResult
@@ -49,18 +47,18 @@ impl TailIterResult {
     }
     pub fn into_iter(self) -> TailIterIter { TailIterIter(self) }
     pub fn next_boxed(&mut self) -> Option<State> {
-        let mut tmp = Nothing;
+        let mut tmp = TailIterResult(None, None);
         ::std::mem::swap(&mut tmp, self);
         match tmp {
-            Nothing => None,
-            Last(x) => Some(x),
-            Wrapped(x) => {
+            TailIterResult(None, None) => None,
+            TailIterResult(Some(x), None) => Some(x),
+            TailIterResult(None, Some(x)) => {
                 *self = x();
                 self.next_boxed()
             },
-            More(s, more) => {
-                *self = Wrapped(more);
-                Some(s)
+            TailIterResult(Some(x), Some(more)) => {
+                *self = TailIterResult(None, Some(more));
+                Some(x)
             }
         }
     }
@@ -69,7 +67,6 @@ impl TailIterResult {
 pub type StateIter = TailIterResult;
 
 impl IterBuilder {
-    //pub fn get_fns(self) -> Vec<Box<FnBox(State) -> StateIter + 'static>> { self.fns }
     pub fn new() -> IterBuilder {
         IterBuilder { fns: Vec::new() }
     }
@@ -79,14 +76,12 @@ impl IterBuilder {
     }
 
     pub fn conde(self, state: State) -> StateIter {
-        if !state.ok() { return Nothing; }
-        //let state = Rc::new(state);
+        if !state.ok() { return TailIterResult(None, None); }
         let mut iter = self.fns.into_iter().rev();
         let state = Rc::new(state);
-        //let last = Last(state);
         let initstate = State::with_parent(state.clone());
         let initfn = iter.next().unwrap();
-        let last = Wrapped(Box::new(move || initfn(initstate)));
+        let last = TailIterResult(None, Some(Box::new(move || initfn(initstate))));
         let chained = iter.fold(last, |accum, f| {
             let child_state = State::with_parent(state.clone());
             let mapped = Box::new(move || f(child_state));
@@ -96,20 +91,20 @@ impl IterBuilder {
     }
 
     pub fn conda(self, state: State) -> StateIter {
-        if !state.ok() { return Nothing; }
+        if !state.ok() { return TailIterResult(None, None); }
         let state = Rc::new(state);
         let mut iter = self.fns.into_iter();
         
-        Wrapped(Box::new(move || {
+        TailIterResult(None, Some(Box::new(move || {
             while let Some(f) = iter.next() {
                 let child = State::with_parent(state.clone());
                 let mut childiter = f(child);
                 if let Some(result) = childiter.next_boxed() {
-                    return More(result, Box::new(move || childiter));
+                    return TailIterResult(Some(result), Some(Box::new(move || childiter)));
                 }
             }
-            Nothing
-        }))
+            TailIterResult(None, None)
+        })))
     }
 }
 
@@ -121,7 +116,7 @@ pub struct IterBuilder {
 
 impl From<State> for StateIter {
     fn from(s: State) -> StateIter {
-        if s.ok() { Last(s) } else { Nothing }
+        if s.ok() { TailIterResult(Some(s), None) } else { TailIterResult(None, None) }
     }
 }
 

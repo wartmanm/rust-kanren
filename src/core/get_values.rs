@@ -27,16 +27,16 @@ impl PartialOrd for CountedVar {
 type VarWrapperIter = Box<Iterator<Item=Box<VarWrapper>>>;
 
 fn value_iter(state: Rc<State>, var: UntypedVar, mut iter: VarWrapperIter) -> TailIter {
-    use iter::TailIterResult::*;
+    use iter::TailIterResult;
     Box::new(move || {
         while let Some(x) = iter.next() {
             let mut child = State::with_parent(state.clone());
             let tid = x.get_type_id();
             let newid = child.eqs.store_value_untyped(Value(x), tid);
             child.untyped_unify(newid, var, tid);
-            if child.ok() { return More(child, value_iter(state, var, iter)); }
+            if child.ok() { return TailIterResult(Some(child), Some(value_iter(state, var, iter))); }
         }
-        return Nothing;
+        return TailIterResult(None, None);
     })
 }
 
@@ -111,7 +111,7 @@ pub fn assign_values<I>(state: State, in_vars: I) -> StateIter where I: IntoIter
 }
 
 fn assign_values_inner(state: State, mut counted: BTreeSet<CountedVar>, mut vars: HashMap<UntypedVar, usize>) -> StateIter {
-    use iter::TailIterResult::Wrapped;
+    use iter::TailIterResult;
     let var = match counted.iter().next() {
         Some(x) => *x,
         None => { return single(state) },
@@ -137,7 +137,7 @@ fn assign_values_inner(state: State, mut counted: BTreeSet<CountedVar>, mut vars
         Some(x) => x,
         None => { return assign_values_inner(state, counted, vars); },
     };
-    let iter = Wrapped(value_iter(Rc::new(state), var.0, val));
+    let iter = TailIterResult(None, Some(value_iter(Rc::new(state), var.0, val)));
     
     iter
     .and(move |state| {

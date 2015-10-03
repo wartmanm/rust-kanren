@@ -194,21 +194,20 @@ where A: ToVar<VarType=Fd>, B: ToVar<VarType=usize> {
         None => { single(state) },
         Some(Values(values)) => {
             let valiter = values.into_iter();
-            TailIterResult::Wrapped(fd_value_iter(Rc::new(state), fd, valiter, u))
+            TailIterResult(None, Some(fd_value_iter(Rc::new(state), fd, valiter, u)))
         }
     }
 }
 
 fn fd_value_iter(state: Rc<State>, fd: Var<Fd>, mut vals: ::std::vec::IntoIter<usize>, u: Var<usize>) -> TailIter {
-    use iter::TailIterResult::*;
     Box::new(move || {
         while let Some(x) = vals.next() {
             let mut child = State::with_parent(state.clone());
             child.unify(x, u);
             child.unify(Single(x), fd);
-            if child.ok() { return More(child, fd_value_iter(state, fd, vals, u)); }
+            if child.ok() { return TailIterResult(Some(child), Some(fd_value_iter(state, fd, vals, u))); }
         }
-        return Nothing;
+        return TailIterResult(None, None);
     })
 }
 
