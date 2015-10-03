@@ -27,8 +27,8 @@ impl PartialOrd for CountedVar {
 type VarWrapperIter = Box<Iterator<Item=Box<VarWrapper>>>;
 
 fn value_iter(state: Rc<State>, var: UntypedVar, mut iter: VarWrapperIter) -> TailIter {
-    use iter::TailIterResult;
-    Box::new(move || {
+    use iter::{TailIterResult, wrap_fn};
+    wrap_fn(move || {
         while let Some(x) = iter.next() {
             let mut child = State::with_parent(state.clone());
             let tid = x.get_type_id();

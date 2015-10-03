@@ -200,7 +200,8 @@ where A: ToVar<VarType=Fd>, B: ToVar<VarType=usize> {
 }
 
 fn fd_value_iter(state: Rc<State>, fd: Var<Fd>, mut vals: ::std::vec::IntoIter<usize>, u: Var<usize>) -> TailIter {
-    Box::new(move || {
+    use iter::wrap_fn;
+    wrap_fn(move || {
         while let Some(x) = vals.next() {
             let mut child = State::with_parent(state.clone());
             child.unify(x, u);

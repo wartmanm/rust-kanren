@@ -17,18 +17,35 @@ impl Iterator for TailIterIter {
     }
 }
 
-pub type TailIter = Box<FnBox() -> TailIterResult + 'static>;
+pub type TailIter = Box<TailIterator>;
+
+trait TailIterator {
+    fn next(self: Box<Self>) -> TailIterResult;
+}
+
+impl TailIterator for Box<FnBox() -> TailIterResult + 'static> {
+    fn next(self: Box<Self>) -> TailIterResult { self() }
+}
+
+pub struct TailFnWrapper<F: FnOnce() -> TailIterResult + 'static>(F);
+impl<F: FnOnce() -> TailIterResult + 'static> TailIterator for TailFnWrapper<F> {
+    fn next(self: Box<Self>) -> TailIterResult { self.0() }
+}
+
+pub fn wrap_fn<F: FnOnce() -> TailIterResult + 'static>(f: F) -> TailIter {
+    Box::new(TailFnWrapper(f))
+}
 
 impl TailIterResult {
     pub fn chain(self, other: TailIter) -> TailIterResult {
         match self {
-            TailIterResult(None, None) => other(),
-            TailIterResult(None, Some(x)) => TailIterResult(None, Some(Box::new(move || {
-                other().chain(x)
+            TailIterResult(None, None) => other.next(),
+            TailIterResult(None, Some(x)) => TailIterResult(None, Some(wrap_fn(move || {
+                other.next().chain(x)
             }))),
             TailIterResult(Some(x), None) => TailIterResult(Some(x), Some(other)),
-            TailIterResult(Some(x), Some(more)) => TailIterResult(Some(x), Some(Box::new(move || {
-                other().chain(more)
+            TailIterResult(Some(x), Some(more)) => TailIterResult(Some(x), Some(wrap_fn(move || {
+                other.next().chain(more)
             }))),
         }
     }
@@ -36,9 +53,9 @@ impl TailIterResult {
     where F: Fn(State) -> S + 'static, S: Into<TailIterResult> {
         match self {
             TailIterResult(None, None) => TailIterResult(None, None),
-            TailIterResult(None, Some(x)) => TailIterResult(None, Some(Box::new(move || x().and(f)))),
+            TailIterResult(None, Some(x)) => TailIterResult(None, Some(wrap_fn(move || x.next().and(f)))),
             TailIterResult(Some(x), None) => f(x).into(),
-            TailIterResult(Some(x), Some(more)) => f(x).into().chain(Box::new(move || more().and(f))),
+            TailIterResult(Some(x), Some(more)) => f(x).into().chain(wrap_fn(move || more.next().and(f))),
         }
     }
     pub fn flat_map<F>(self, f: F) -> TailIterResult
@@ -53,7 +70,7 @@ impl TailIterResult {
             TailIterResult(None, None) => None,
             TailIterResult(Some(x), None) => Some(x),
             TailIterResult(None, Some(x)) => {
-                *self = x();
+                *self = x.next();
                 self.next_boxed()
             },
             TailIterResult(Some(x), Some(more)) => {
@@ -81,10 +98,10 @@ impl IterBuilder {
         let state = Rc::new(state);
         let initstate = State::with_parent(state.clone());
         let initfn = iter.next().unwrap();
-        let last = TailIterResult(None, Some(Box::new(move || initfn(initstate))));
+        let last = TailIterResult(None, Some(wrap_fn(move || initfn(initstate))));
         let chained = iter.fold(last, |accum, f| {
             let child_state = State::with_parent(state.clone());
-            let mapped = Box::new(move || f(child_state));
+            let mapped = wrap_fn(move || f(child_state));
             accum.chain(mapped)
         });
         chained
@@ -95,12 +112,12 @@ impl IterBuilder {
         let state = Rc::new(state);
         let mut iter = self.fns.into_iter();
         
-        TailIterResult(None, Some(Box::new(move || {
+        TailIterResult(None, Some(wrap_fn(move || {
             while let Some(f) = iter.next() {
                 let child = State::with_parent(state.clone());
                 let mut childiter = f(child);
                 if let Some(result) = childiter.next_boxed() {
-                    return TailIterResult(Some(result), Some(Box::new(move || childiter)));
+                    return TailIterResult(Some(result), Some(wrap_fn(move || childiter)));
                 }
             }
             TailIterResult(None, None)
