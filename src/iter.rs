@@ -2,6 +2,7 @@ use core::{ToVar, State, Var, Unifier, VarRetrieve};
 use std::rc::Rc;
 use std::boxed::FnBox;
 use std::marker::PhantomData;
+use std::collections::VecDeque;
 
 pub fn single(s: State) -> TailIterResult { s.into() }
 pub fn none() -> TailIterResult { TailIterResult(None, None) }
@@ -47,6 +48,26 @@ impl TailIterator for ChainIter {
                 *self = ChainIter(Some((other, more)));
                 TailIterResult(x, Some(self))
             },
+        }
+    }
+}
+
+struct ChainManyIter(VecDeque<TailIter>);
+
+impl TailIterator for ChainManyIter {
+    fn next(mut self: Box<Self>) -> TailIterResult {
+        if self.0.len() <= 1 {
+            return TailIterResult(None, self.0.pop_front());
+        }
+        match self.0.pop_front().unwrap().next() {
+            TailIterResult(None, None) => {
+                TailIterResult(None, Some(self)) // TODO call self.next() instead?
+            }
+            TailIterResult(Some(x), None) => TailIterResult(Some(x), Some(self)),
+            TailIterResult(x, Some(more)) => {
+                self.0.push_back(more);
+                TailIterResult(x, Some(self))
+            }
         }
     }
 }
@@ -130,17 +151,13 @@ impl IterBuilder {
 
     pub fn conde(self, state: State) -> StateIter {
         if !state.ok() { return TailIterResult(None, None); }
-        let mut iter = self.fns.into_iter().rev();
+        let mut chain = VecDeque::with_capacity(self.fns.len());
         let state = Rc::new(state);
-        let initstate = State::with_parent(state.clone());
-        let initfn = iter.next().unwrap();
-        let last = TailIterResult(None, Some(wrap_fn(move || initfn(initstate))));
-        let chained = iter.fold(last, |accum, f| {
+        for f in self.fns.into_iter() {
             let child_state = State::with_parent(state.clone());
-            let mapped = wrap_fn(move || f(child_state));
-            accum.chain(mapped)
-        });
-        chained
+            chain.push_back(wrap_fn(move || f(child_state)));
+        }
+        TailIterResult(None, Some(Box::new(ChainManyIter(chain))))
     }
 
     pub fn conda(self, state: State) -> StateIter {
