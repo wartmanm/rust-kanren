@@ -51,6 +51,29 @@ impl TailIterator for ChainIter {
     }
 }
 
+struct AndIter<F: Fn(State) -> S + 'static, S: Into<TailIterResult> + 'static> {
+    f: F,
+    iter: Option<TailIter>,
+}
+
+impl<F: Fn(State) -> S + 'static, S: Into<TailIterResult> + 'static> TailIterator for AndIter<F, S> {
+    fn next(mut self: Box<Self>) -> TailIterResult {
+        let current = self.iter.take().unwrap();
+        match current.next() {
+            TailIterResult(None, None) => TailIterResult(None, None),
+            TailIterResult(None, Some(x)) => {
+                self.iter = Some(x);
+                TailIterResult(None, Some(self))
+            },
+            TailIterResult(Some(x), None) => (self.f)(x).into(),
+            TailIterResult(Some(x), Some(more)) => {
+                self.iter = Some(more);
+                (self.f)(x).into().chain(self)
+            }
+        }
+    }
+}
+
 impl TailIterResult {
     pub fn chain(self, other: TailIter) -> TailIterResult {
         match self {
@@ -63,12 +86,12 @@ impl TailIterResult {
         }
     }
     pub fn and<F, S>(self, f: F) -> TailIterResult
-    where F: Fn(State) -> S + 'static, S: Into<TailIterResult> {
+    where F: Fn(State) -> S + 'static, S: Into<TailIterResult> + 'static {
         match self {
             TailIterResult(None, None) => TailIterResult(None, None),
-            TailIterResult(None, Some(x)) => TailIterResult(None, Some(wrap_fn(move || x.next().and(f)))),
+            TailIterResult(None, Some(x)) => TailIterResult(None, Some(Box::new(AndIter { f: f, iter: Some(x) }))),
             TailIterResult(Some(x), None) => f(x).into(),
-            TailIterResult(Some(x), Some(more)) => f(x).into().chain(wrap_fn(move || more.next().and(f))),
+            TailIterResult(Some(x), Some(more)) => f(x).into().chain(Box::new(AndIter { f: f, iter: Some(more) }))
         }
     }
     pub fn flat_map<F>(self, f: F) -> TailIterResult
