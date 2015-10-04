@@ -36,17 +36,30 @@ pub fn wrap_fn<F: FnOnce() -> TailIterResult + 'static>(f: F) -> TailIter {
     Box::new(TailFnWrapper(f))
 }
 
+struct ChainIter(Option<(TailIter, TailIter)>);
+
+impl TailIterator for ChainIter {
+    fn next(mut self: Box<Self>) -> TailIterResult {
+        let (current, other) = self.0.take().unwrap();
+        match current.next() {
+            TailIterResult(x, None) => TailIterResult(x, Some(other)),
+            TailIterResult(x, Some(more)) => {
+                *self = ChainIter(Some((other, more)));
+                TailIterResult(x, Some(self))
+            },
+        }
+    }
+}
+
 impl TailIterResult {
     pub fn chain(self, other: TailIter) -> TailIterResult {
         match self {
             TailIterResult(None, None) => other.next(),
-            TailIterResult(None, Some(x)) => TailIterResult(None, Some(wrap_fn(move || {
-                other.next().chain(x)
-            }))),
             TailIterResult(Some(x), None) => TailIterResult(Some(x), Some(other)),
-            TailIterResult(Some(x), Some(more)) => TailIterResult(Some(x), Some(wrap_fn(move || {
-                other.next().chain(more)
-            }))),
+            TailIterResult(x, Some(more)) => {
+                let chain = Box::new(ChainIter(Some((other, more))));
+                TailIterResult(x, Some(chain))
+            }
         }
     }
     pub fn and<F, S>(self, f: F) -> TailIterResult
