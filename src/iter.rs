@@ -52,14 +52,12 @@ impl TailIterator for ChainIter {
     }
 }
 
-struct ChainManyIter<I>
-where I: Iterator<Item=TailIterResult> + 'static {
+struct ChainManyIter {
     chain:VecDeque<TailIter>,
-    iter: I,
+    iter: Box<Iterator<Item=TailIterResult> + 'static>,
 }
 
-impl<I> TailIterator for ChainManyIter<I>
-where I: Iterator<Item=TailIterResult> + 'static {
+impl TailIterator for ChainManyIter {
     fn next(mut self: Box<Self>) -> TailIterResult {
         let next = match self.iter.next() {
             Some(x) => x,
@@ -83,12 +81,12 @@ where I: Iterator<Item=TailIterResult> + 'static {
     }
 }
 
-struct AndIter<F: Fn(State) -> S + 'static, S: Into<TailIterResult> + 'static> {
-    f: F,
+struct AndIter<S: Into<TailIterResult> + 'static> {
+    f: Box<Fn(State) -> S + 'static>,
     iter: Option<TailIter>,
 }
 
-impl<F: Fn(State) -> S + 'static, S: Into<TailIterResult> + 'static> TailIterator for AndIter<F, S> {
+impl<S: Into<TailIterResult> + 'static> TailIterator for AndIter<S> {
     fn next(mut self: Box<Self>) -> TailIterResult {
         let current = self.iter.take().unwrap();
         match current.next() {
@@ -119,6 +117,11 @@ impl TailIterResult {
     }
     pub fn and<F, S>(self, f: F) -> TailIterResult
     where F: Fn(State) -> S + 'static, S: Into<TailIterResult> + 'static {
+        self.and_inner(Box::new(f))
+    }
+
+    fn and_inner<S>(self, f: Box<Fn(State) -> S + 'static>) -> TailIterResult
+    where S: Into<TailIterResult> + 'static {
         match self {
             TailIterResult(None, None) => TailIterResult(None, None),
             TailIterResult(None, Some(x)) => TailIterResult(None, Some(Box::new(AndIter { f: f, iter: Some(x) }))),
@@ -183,7 +186,7 @@ where F: Fn(usize, State) -> StateIter + 'static {
         if !state.ok() { return TailIterResult(None, None); }
         let chain = VecDeque::with_capacity(self.len);
         let iter = StateFnIter { f: self.f, state: Rc::new(state), len: self.len, pos: 0 };
-        TailIterResult(None, Some(Box::new(ChainManyIter { iter: iter, chain: chain })))
+        TailIterResult(None, Some(Box::new(ChainManyIter { iter: Box::new(iter), chain: chain })))
     }
 
     /*
