@@ -2,6 +2,8 @@ use core::{ToVar, State, Var, Unifier, VarRetrieve};
 use std::rc::Rc;
 use std::boxed::FnBox;
 use std::marker::PhantomData;
+use std::any::*;
+use std::raw::TraitObject;
 use std::collections::VecDeque;
 
 pub fn single(s: State) -> TailIterResult { s.into() }
@@ -20,7 +22,7 @@ impl Iterator for TailIterIter {
 
 pub type TailIter = Box<TailIterator>;
 
-trait TailIterator {
+trait TailIterator: Any {
     fn next(self: Box<Self>) -> TailIterResult;
 }
 
@@ -29,11 +31,11 @@ impl TailIterator for Box<FnBox() -> TailIterResult + 'static> {
 }
 
 pub struct TailFnWrapper<F: FnOnce() -> TailIterResult + 'static>(F);
-impl<F: FnOnce() -> TailIterResult + 'static> TailIterator for TailFnWrapper<F> {
+impl<F: FnOnce() -> TailIterResult + Any + 'static> TailIterator for TailFnWrapper<F> {
     fn next(self: Box<Self>) -> TailIterResult { self.0() }
 }
 
-pub fn wrap_fn<F: FnOnce() -> TailIterResult + 'static>(f: F) -> TailIter {
+pub fn wrap_fn<F: FnOnce() -> TailIterResult + Any + 'static>(f: F) -> TailIter {
     Box::new(TailFnWrapper(f))
 }
 
@@ -67,12 +69,12 @@ impl TailIterator for ChainManyIter {
     }
 }
 
-struct AndIter<S: Into<TailIterResult> + 'static> {
+struct AndIter<S: Into<TailIterResult> + Any + 'static> {
     f: Box<Fn(State) -> S + 'static>,
     iter: Option<TailIter>,
 }
 
-impl<S: Into<TailIterResult> + 'static> TailIterator for AndIter<S> {
+impl<S: Into<TailIterResult> + Any + 'static> TailIterator for AndIter<S> {
     fn next(mut self: Box<Self>) -> TailIterResult {
         let current = self.iter.take().unwrap();
         match current.next() {
@@ -90,27 +92,46 @@ impl<S: Into<TailIterResult> + 'static> TailIterator for AndIter<S> {
     }
 }
 
+impl TailIterator {
+    pub fn downcast_mut<T>(&mut self) -> Option<&mut T>
+    where T: Any + 'static {
+        if TypeId::of::<T>() == (*self).get_type_id() {
+            let x: TraitObject = unsafe { ::std::mem::transmute(self) };
+            Some(unsafe { ::std::mem::transmute(x.data) })
+        } else {
+            None
+        }
+    }
+}
+
 impl TailIterResult {
     pub fn chain(self, other: TailIter) -> TailIterResult {
         match self {
             TailIterResult(None, None) => other.next(),
             TailIterResult(Some(x), None) => TailIterResult(Some(x), Some(other)),
-            TailIterResult(x, Some(more)) => {
+            TailIterResult(x, Some(mut more)) => {
+                if TypeId::of::<ChainManyIter>() == (*more).get_type_id() {
+                    {
+                        let chain = more.downcast_mut::<ChainManyIter>().unwrap();
+                        chain.chain.push_front(other);
+                    }
+                    return TailIterResult(x, Some(more));
+                }
                 let mut chain = VecDeque::with_capacity(2);
                 chain.push_back(other);
                 chain.push_back(more);
                 let iter = Box::new(ChainManyIter { chain: chain, iter: None });
-                TailIterResult(x, Some(iter))
+                return TailIterResult(x, Some(iter));
             }
         }
     }
     pub fn and<F, S>(self, f: F) -> TailIterResult
-    where F: Fn(State) -> S + 'static, S: Into<TailIterResult> + 'static {
+    where F: Fn(State) -> S + 'static, S: Into<TailIterResult> + Any + 'static {
         self.and_inner(Box::new(f))
     }
 
     fn and_inner<S>(self, f: Box<Fn(State) -> S + 'static>) -> TailIterResult
-    where S: Into<TailIterResult> + 'static {
+    where S: Into<TailIterResult> + Any + 'static {
         match self {
             TailIterResult(None, None) => TailIterResult(None, None),
             TailIterResult(None, Some(x)) => TailIterResult(None, Some(Box::new(AndIter { f: f, iter: Some(x) }))),
