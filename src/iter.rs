@@ -52,20 +52,31 @@ impl TailIterator for ChainIter {
     }
 }
 
-struct ChainManyIter(VecDeque<TailIter>);
+struct ChainManyIter<I>
+where I: Iterator<Item=TailIterResult> + 'static {
+    chain:VecDeque<TailIter>,
+    iter: I,
+}
 
-impl TailIterator for ChainManyIter {
+impl<I> TailIterator for ChainManyIter<I>
+where I: Iterator<Item=TailIterResult> + 'static {
     fn next(mut self: Box<Self>) -> TailIterResult {
-        if self.0.len() <= 1 {
-            return TailIterResult(None, self.0.pop_front());
-        }
-        match self.0.pop_front().unwrap().next() {
+        let next = match self.iter.next() {
+            Some(x) => x,
+            None => {
+                if self.chain.len() <= 1 {
+                    return TailIterResult(None, self.chain.pop_front());
+                }
+                self.chain.pop_front().unwrap().next()
+            }
+        };
+        match next {
             TailIterResult(None, None) => {
                 TailIterResult(None, Some(self)) // TODO call self.next() instead?
             }
             TailIterResult(Some(x), None) => TailIterResult(Some(x), Some(self)),
             TailIterResult(x, Some(more)) => {
-                self.0.push_back(more);
+                self.chain.push_back(more);
                 TailIterResult(x, Some(self))
             }
         }
@@ -140,6 +151,28 @@ impl TailIterResult {
 
 pub type StateIter = TailIterResult;
 
+pub struct StateFnIter<F>
+where F: Fn(usize, State) -> StateIter + 'static {
+    f: F,
+    state: Rc<State>,
+    len: usize,
+    pos: usize,
+}
+
+impl<F> Iterator for StateFnIter<F>
+where F: Fn(usize, State) -> StateIter + 'static {
+    type Item = StateIter;
+    fn next(&mut self) -> Option<StateIter> {
+        if self.pos == self.len {
+            return None;
+        }
+        let state = State::with_parent(self.state.clone());
+        let ret = Some((self.f)(self.pos, state));
+        self.pos += 1;
+        ret
+    }
+}
+
 impl<F> IterBuilder<F>
 where F: Fn(usize, State) -> StateIter + 'static {
     pub fn new(f: F, len: usize) -> IterBuilder<F> {
@@ -148,15 +181,9 @@ where F: Fn(usize, State) -> StateIter + 'static {
 
     pub fn conde(self, state: State) -> StateIter {
         if !state.ok() { return TailIterResult(None, None); }
-        let mut chain = VecDeque::with_capacity(self.len);
-        let state = Rc::new(state);
-        let rcf = Rc::new(self.f);
-        for i in (0..self.len) {
-            let child_state = State::with_parent(state.clone());
-            let f = rcf.clone();
-            chain.push_back(wrap_fn(move || f(i, child_state)));
-        }
-        TailIterResult(None, Some(Box::new(ChainManyIter(chain))))
+        let chain = VecDeque::with_capacity(self.len);
+        let iter = StateFnIter { f: self.f, state: Rc::new(state), len: self.len, pos: 0 };
+        TailIterResult(None, Some(Box::new(ChainManyIter { iter: iter, chain: chain })))
     }
 
     /*
