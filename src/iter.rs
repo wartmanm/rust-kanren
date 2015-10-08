@@ -37,29 +37,15 @@ pub fn wrap_fn<F: FnOnce() -> TailIterResult + 'static>(f: F) -> TailIter {
     Box::new(TailFnWrapper(f))
 }
 
-struct ChainIter(Option<(TailIter, TailIter)>);
-
-impl TailIterator for ChainIter {
-    fn next(mut self: Box<Self>) -> TailIterResult {
-        let (current, other) = self.0.take().unwrap();
-        match current.next() {
-            TailIterResult(x, None) => TailIterResult(x, Some(other)),
-            TailIterResult(x, Some(more)) => {
-                *self = ChainIter(Some((other, more)));
-                TailIterResult(x, Some(self))
-            },
-        }
-    }
-}
-
 struct ChainManyIter {
     chain:VecDeque<TailIter>,
-    iter: Box<Iterator<Item=TailIterResult> + 'static>,
+    iter: Option<Box<Iterator<Item=TailIterResult> + 'static>>,
 }
 
 impl TailIterator for ChainManyIter {
     fn next(mut self: Box<Self>) -> TailIterResult {
-        let next = match self.iter.next() {
+        let iter_next = self.iter.as_mut().and_then(|x| x.next());
+        let next = match iter_next {
             Some(x) => x,
             None => {
                 if self.chain.len() <= 1 {
@@ -110,8 +96,11 @@ impl TailIterResult {
             TailIterResult(None, None) => other.next(),
             TailIterResult(Some(x), None) => TailIterResult(Some(x), Some(other)),
             TailIterResult(x, Some(more)) => {
-                let chain = Box::new(ChainIter(Some((other, more))));
-                TailIterResult(x, Some(chain))
+                let mut chain = VecDeque::with_capacity(2);
+                chain.push_back(other);
+                chain.push_back(more);
+                let iter = Box::new(ChainManyIter { chain: chain, iter: None });
+                TailIterResult(x, Some(iter))
             }
         }
     }
@@ -186,7 +175,7 @@ where F: Fn(usize, State) -> StateIter + 'static {
         if !state.ok() { return TailIterResult(None, None); }
         let chain = VecDeque::with_capacity(self.len);
         let iter = StateFnIter { f: self.f, state: Rc::new(state), len: self.len, pos: 0 };
-        TailIterResult(None, Some(Box::new(ChainManyIter { iter: Box::new(iter), chain: chain })))
+        TailIterResult(None, Some(Box::new(ChainManyIter { iter: Some(Box::new(iter)), chain: chain })))
     }
 
     /*
