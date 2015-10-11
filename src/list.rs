@@ -2,6 +2,7 @@ use std::iter::IntoIterator;
 use std::fmt::{Debug, Formatter};
 use std::any::Any;
 use core::{ToVar, VarWrapper, State, StateProxy, Var, VarStore, VarRetrieve, Unifier, UnifyResult, UntypedVar};
+///! The end of a singly linked list.
 pub use list::List::Nil; // so you can import list::{Pair, Nil}
 use list::List::Pair as VarPair;
 
@@ -12,6 +13,7 @@ where A: ToVar {
     Nil
 }
 
+///! A struct that can be converted into a (Head, Tail) pair in a singly linked list.
 #[derive(Debug)]
 pub struct Pair<A, B, C>(pub B, pub C)
 where A: ToVar, B: ToVar<VarType=A>, C: ToVar<VarType=List<A>>;
@@ -149,13 +151,14 @@ where A : ToVar {
         //state.make_var_of(pair)
     //}
 
+    ///! Create a new list from an iterator.
     pub fn build<I>(iter: I) -> ListBuilder<A, <I as IntoIterator>::IntoIter>
     where I: IntoIterator<Item=A>, <I as IntoIterator>::IntoIter: 'static {
         ListBuilder::new(iter)
     }
 }
 
-pub trait ListExt<A> where A: ToVar {
+trait ListExt<A> where A: ToVar {
     fn check_elem<B>(&self, state: &mut State, elem: B) -> bool where B: ToVar<VarType=A>;
 }
 
@@ -207,6 +210,7 @@ impl<A, B> ListBuilder<A, B> where A: ToVar, B: Iterator<Item=A> {
     }
 }
 
+///! Helper to create a `List` from an `Iterator`, used by `List::build()`.
 impl<A, B> ToVar for ListBuilder<A, B> where A: ToVar, B: Iterator<Item=A> + Any {
     type VarType = List<<A as ToVar>::VarType>;
     fn into_var<U: VarStore+Unifier>(self, state: &mut U) -> Var<List<<A as ToVar>::VarType>> {

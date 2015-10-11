@@ -1,9 +1,14 @@
 #[macro_use]
-///! Contains ToVar definitions for many of Rust's built-in types.
+///! Contains `ToVar` definitions for many of Rust's built-in types.
 pub mod vars;
+///! Contains the implementation of the `Disequal` constraint.
 pub mod disequal;
+///! Contains `Reifier`, which reifies variables, providing a consistent, unique identifier for unset
+///! variables.
 pub mod reify;
-pub mod get_values;
+mod get_values;
+
+pub use core::get_values::{assign_values, assign_all_values};
 
 use std::rc::Rc;
 use std::fmt::{self, Debug, Formatter};
@@ -29,7 +34,7 @@ impl<A> Clone for Var<A> { fn clone(&self) -> Var<A> { *self } }
 impl<A> Copy for Var<A> { }
 
 ///! State is the heart of rust_kanren.  It tracks all variable substitutions added by calling
-///! unify(), hands out Vars through make_var() and make_var_of(), and tracks whether any
+///! `unify()`, hands out Vars through `make_var()` and `make_var_of()`, and tracks whether any
 ///! unifications have failed.
 pub struct State {
     eqs: VarMap,
@@ -46,7 +51,7 @@ pub struct StateProxy<'a> {
     parent: &'a mut State,
 }
 
-///! Enum representing the possible outcomes of `Constraint::update`().
+///! Enum representing the possible outcomes of `Constraint::update()`.
 #[derive(Debug)]
 pub enum ConstraintResult<A> {
     Failed,
@@ -70,13 +75,14 @@ pub trait Constraint: Debug + Sized {
     ///! call varmap.contains_key() for each variable in the constraint.
     fn relevant(&self, _: &VarMap) -> bool;
     ///! Called to update a constraint's variables when unification has assigned them to be equal
-    ///! to other variables.  Should call state.update_var() for each variable in the constraint.
+    ///! to other variables.  Should call `state.update_var()` for each variable in the constraint.
     fn update_vars(&mut self, _: &State);
-    ///! (Optional) Called to determine whether update_vars() needs to be called.  Should call
-    ///! varmap.need_update() for each variable in the constraint.
+    ///! (Optional) Called to determine whether `update_vars()` needs to be called.  Should call
+    ///! `varmap.need_update()` for each variable in the constraint.
     fn need_update(&self, vars: &VarMap) -> bool { self.relevant(vars) }
 }
 
+///! Trait for creating a `Constraint`, given a `State`.
 pub trait ToConstraint {
     type ConstraintType: Constraint + 'static + Clone;
     fn into_constraint(self, state: &mut State) -> Self::ConstraintType;
@@ -525,9 +531,9 @@ impl State {
         value.into_var(self)
     }
 
-    pub fn has_var(&self, var: UntypedVar) -> bool {
-        self.eqs.contains_key(&var)
-    }
+    //pub fn has_var(&self, var: UntypedVar) -> bool {
+        //self.eqs.contains_key(&var)
+    //}
 
     pub fn update_var(&self, var: &mut UntypedVar) {
         *var = self.follow_id(*var);
@@ -541,6 +547,7 @@ impl State {
         self.proxy_eqs.ok = self.eqs.ok;
     }
 
+    ///! Test whether two vars can be unified, cannot be unified, or are already equal.
     pub fn are_vars_unified<A>(&mut self, a: Var<A>, b: Var<A>) -> Unifiability where A: ToVar {
         use core::Unifiability::*;
         {
@@ -555,6 +562,9 @@ impl State {
         self.restore_proxy();
         result
     }
+
+    ///! Test whether one var occurs anywhere within another, such as a list element or sublist in
+    ///! a list.
     pub fn occurs_check(&mut self, elem: UntypedVar, list: UntypedVar) -> bool {
         // TODO: this does not require &mut self in any way except that that's what StateProxy
         // requires, and VarWrapper::occurs_check can't be generic.
@@ -566,6 +576,7 @@ impl State {
     }
 }
 
+///! Return type for `State::are_vars_unified`.
 #[derive(Eq, PartialEq, Copy, Clone)]
 pub enum Unifiability {
     Impossible,

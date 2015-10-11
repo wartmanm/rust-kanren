@@ -2,7 +2,7 @@
 extern crate kanren;
 
 use kanren::core::{State, Unifier, Var, VarStore, VarRetrieve};
-use kanren::core::get_values::assign_all_values;
+use kanren::core::assign_all_values;
 use kanren::iter::{StateIter, single};
 use std::io::Read;
 use kanren::constraints::{FdSumConstraint, AllDiffConstraint};

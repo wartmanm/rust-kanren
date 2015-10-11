@@ -182,6 +182,7 @@ impl<A, B, C> RangeMerge<A, B, C> where A: Iterator<Item=C>, B: Iterator<Item=C>
     }
 }
 
+///! Provides an iterator unifying a `Fd` variable with any of its possible values.
 pub fn fd_values<A, B>(mut state: State, fd: A, u: B) -> StateIter
 where A: ToVar<VarType=Fd>, B: ToVar<VarType=usize> {
     let fd = state.make_var_of(fd);

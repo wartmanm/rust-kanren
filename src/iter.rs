@@ -1,40 +1,45 @@
 use core::{ToVar, State, Var, Unifier, VarRetrieve};
 use std::rc::Rc;
-use std::boxed::FnBox;
 use std::marker::PhantomData;
 use std::any::*;
 use std::raw::TraitObject;
 use std::collections::VecDeque;
 
+///! Creates a `TailIterResult` with one value.
 pub fn single(s: State) -> TailIterResult { s.into() }
+///! Creates a `TailIterResult` with no values.
 pub fn none() -> TailIterResult { TailIterResult(None, None) }
 
+///! An iterator consisting of an optional result and optional continuation.  This makes it
+///! possible to shorten deep chains of iterators if one of them has been exhausted of results, in
+///! addition to distinguishing iterators that need to do additional work from those that can
+///! return a value immediately.
 pub struct TailIterResult(pub Option<State>, pub Option<TailIter>);
 
+///! `TailIterIter` provides a normal Rust iterator over a `TailIterResult` iterator.
 pub struct TailIterIter(TailIterResult);
 
 impl Iterator for TailIterIter {
     type Item = State;
     fn next(&mut self) -> Option<State> {
-        self.0.next_boxed()
+        self.0.next()
     }
 }
 
 pub type TailIter = Box<TailIterator>;
 
+///! The trait used for the continuation portion of a TailI`terResult` iterator.
 trait TailIterator: Any {
     fn next(self: Box<Self>) -> TailIterResult;
 }
 
-impl TailIterator for Box<FnBox() -> TailIterResult + 'static> {
-    fn next(self: Box<Self>) -> TailIterResult { self() }
-}
-
-pub struct TailFnWrapper<F: FnOnce() -> TailIterResult + 'static>(F);
+///! Used by wrap_fn.
+struct TailFnWrapper<F: FnOnce() -> TailIterResult + 'static>(F);
 impl<F: FnOnce() -> TailIterResult + Any + 'static> TailIterator for TailFnWrapper<F> {
     fn next(self: Box<Self>) -> TailIterResult { self.0() }
 }
 
+///! Transforms a function producing a `TailIterResult` into a `TailIter`.
 pub fn wrap_fn<F: FnOnce() -> TailIterResult + Any + 'static>(f: F) -> TailIter {
     Box::new(TailFnWrapper(f))
 }
@@ -151,6 +156,7 @@ impl TailIterResult {
             }
         }
     }
+    ///! Synonym for `flat_map`.
     pub fn and<F, S>(self, f: F) -> TailIterResult
     where F: Fn(State) -> S + 'static, S: Into<TailIterResult> + Any + 'static {
         self.and_inner(Box::new(f))
@@ -170,7 +176,7 @@ impl TailIterResult {
         self.and(f)
     }
     pub fn into_iter(self) -> TailIterIter { TailIterIter(self) }
-    pub fn next_boxed(&mut self) -> Option<State> {
+    pub fn next(&mut self) -> Option<State> {
         let mut tmp = TailIterResult(None, None);
         ::std::mem::swap(&mut tmp, self);
         match tmp {
@@ -178,7 +184,7 @@ impl TailIterResult {
             TailIterResult(Some(x), None) => Some(x),
             TailIterResult(None, Some(x)) => {
                 *self = x.next();
-                self.next_boxed()
+                self.next()
             },
             TailIterResult(Some(x), Some(more)) => {
                 *self = TailIterResult(None, Some(more));
@@ -190,7 +196,8 @@ impl TailIterResult {
 
 pub type StateIter = TailIterResult;
 
-pub struct StateFnIter<F>
+///! Used internally by IterBuilder to iterate over alternatives.
+struct StateFnIter<F>
 where F: Fn(usize, State) -> StateIter + 'static {
     f: F,
     state: Rc<State>,
@@ -242,6 +249,8 @@ where F: Fn(usize, State) -> StateIter + 'static {
 
 pub type WrappedStateIter = Box<Fn(State) -> TailIterResult + 'static>;
 
+///! Constructs iterators over alternate solutions.  You don't need to use this directly; instead,
+///! use the conde! macro.
 pub struct IterBuilder<F>
 where F: Fn(usize, State) -> StateIter + 'static {
     f: F,
@@ -266,7 +275,7 @@ impl<'a, A> Iterator for VarIter<'a, A>
 where A : ToVar + Clone {
     type Item = Option<A>;
     fn next(&mut self) -> Option<Option<A>> {
-        self.iter.next_boxed().map(|x| x.get_value(self.var).map(|val| val.clone()))
+        self.iter.next().map(|x| x.get_value(self.var).map(|val| val.clone()))
     }
 }
 
@@ -334,7 +343,7 @@ pub struct FindAllIter<'a> {
 impl<'a> Iterator for FindAllIter<'a> {
     type Item = State;
     fn next(&mut self) -> Option<State> {
-        self.iter.next_boxed()
+        self.iter.next()
     }
 }
 

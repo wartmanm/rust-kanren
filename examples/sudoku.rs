@@ -60,7 +60,7 @@ fn main() {
             //fresh!(state, head, tail);
             //state.unify(list, Pair(head, tail));
         //}
-        ::kanren::core::get_values::assign_all_values(state)
+        ::kanren::core::assign_all_values(state)
     }
 
     struct UnderscoreWriter<T>(Option<T>);

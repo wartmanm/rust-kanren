@@ -6,28 +6,24 @@ macro_rules! fresh {
     )
 }
 
-///! Used internally by the other `cond!` macros.
-#[macro_export]
-macro_rules! cond_builder {
-    ($method:ident, $state:ident, $($block:block),+,) => ({
-        let mut builder = $crate::iter::IterBuilder::new();
-        $(builder.push(move |mut $state| $block);)+
-        builder.$method($state)
-    })
-}
-
+///! "Or"s multiple blocks together, producing a single iterator that will return all the results
+///from each one, in a breadth-first fashion.
 #[macro_export]
 macro_rules! conde {
     ($state:ident, $($blocks:block),*) => (
         conde_inner!($state, 0, conds:(), blocks:($($blocks,)*)).conde($state)
     );
 }
+///! "Or"s multiple blocks together, but returns all the results from the first one to return any
+///! results, discarding the others.
 #[macro_export]
 macro_rules! conda {
     ($state:ident, $($blocks:block),*) => (
         conde_inner!($state, 0, conds:(), blocks:($($blocks,)*)).conda($state)
     );
 }
+///! "Or"s multiple blocks together, but returns only a single value from the first one to return
+///! any results, discarding any subsequent ones as well as the other blocks.
 #[macro_export]
 macro_rules! condu {
     ($state:ident, $($blocks:block),*) => (
@@ -35,6 +31,8 @@ macro_rules! condu {
     );
 }
 
+///! Helper to create generic methods that accept both Vars and ToVars for any of their variable
+///! arguments.
 #[macro_export]
 macro_rules! method {
     ($name:ident($state:ident, { args=$($arg:ident: $argty:ty),* $(,)* } { vars=$($var:ident: $varty:ty),* $(,)* }) $body:expr) => (
@@ -55,6 +53,7 @@ macro_rules! method {
     );
 }
 
+///! Used internally by the other `cond!` macros.
 #[macro_export]
 macro_rules! conde_inner {
     ($state:ident, $count:expr, conds:($($counts:expr => $cblocks:expr,)*), blocks:($block:expr, $($blocks:expr,)*)) => (

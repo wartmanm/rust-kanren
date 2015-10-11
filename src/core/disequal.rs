@@ -1,32 +1,14 @@
 use std::any::TypeId;
 use std::fmt::{self, Debug, Formatter};
-use core::{ConstraintResult, StateProxy, UntypedVar, Constraint, ToConstraint, State, Var, ToVar, FollowRef, Unifier, VarMap};
+use core::{ConstraintResult, StateProxy, UntypedVar, Constraint, State, Var, ToVar, FollowRef, Unifier, VarMap};
 use core::ConstraintResult::*;
 use core::VarRef::*;
 
-///! The Disequal constraint enforces that its arguments will never have equal values.
+///! The Disequal constraint enforces that its arguments will never have equal values.  Don't use
+///! this directly, use `kanren::constraints::Disequal` instead.
 #[derive(Clone)]
 pub struct Disequal {
     pairs: Vec<(UntypedVar, UntypedVar, TypeId)>,
-}
-
-///! Builder for Disequal, which enforces that its arguments will never have equal values.
-pub struct ToDisequal<A, B, C>
-where A: ToVar<VarType=C>, B: ToVar<VarType=C>, C: ToVar {
-    a: A,
-    b: B,
-}
-
-impl<A, B, C> ToConstraint for ToDisequal<A, B, C>
-where A: ToVar<VarType=C>, B: ToVar<VarType=C>, C: ToVar {
-    type ConstraintType = Disequal;
-    fn into_constraint(self, state: &mut State) -> Disequal {
-        let mut disequal = Disequal::new_empty();
-        let a = state.make_var_of(self.a);
-        let b = state.make_var_of(self.b);
-        disequal.push(state, a, b);
-        disequal
-    }
 }
 
 impl Debug for Disequal {
@@ -41,15 +23,8 @@ impl Debug for Disequal {
     }
 }
 
-impl<A, B, C> ToDisequal<A, B, C>
-where A: ToVar<VarType=C>, B: ToVar<VarType=C>, C: ToVar {
-    pub fn new(a: A, b: B) -> ToDisequal<A, B, C> {
-        ToDisequal { a: a, b: b }
-    }
-}
-
 impl Disequal {
-    fn new_empty() -> Disequal {
+    pub fn new_empty() -> Disequal {
         Disequal { pairs: Vec::new() }
     }
     pub fn push<A>(&mut self, state: &State, a: Var<A>, b: Var<A>) where A: ToVar {

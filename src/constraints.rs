@@ -5,8 +5,36 @@ use finitedomain::Fd;
 use finitedomain::Fd::*;
 use std::collections::HashSet;
 use std::borrow::Cow;
-pub use core::disequal::ToDisequal as Disequal;
+use core::disequal::Disequal as VarDisequal;
 
+///! The Disequal constraint enforces that its arguments will never have equal values.
+pub struct Disequal<A, B, C>
+where A: ToVar<VarType=C>, B: ToVar<VarType=C>, C: ToVar {
+    a: A,
+    b: B,
+}
+
+impl<A, B, C> Disequal<A, B, C>
+where A: ToVar<VarType=C>, B: ToVar<VarType=C>, C: ToVar {
+    pub fn new(a: A, b: B) -> Disequal<A, B, C> {
+        Disequal { a: a, b: b }
+    }
+}
+
+///! The Disequal constraint enforces that its arguments will never have equal values.
+impl<A, B, C> ToConstraint for Disequal<A, B, C>
+where A: ToVar<VarType=C>, B: ToVar<VarType=C>, C: ToVar {
+    type ConstraintType = VarDisequal;
+    fn into_constraint(self, state: &mut State) -> VarDisequal {
+        let mut disequal = VarDisequal::new_empty();
+        let a = state.make_var_of(self.a);
+        let b = state.make_var_of(self.b);
+        disequal.push(state, a, b);
+        disequal
+    }
+}
+
+///! Constrains three number variables so that A + B = C.
 #[derive(Debug, Clone)]
 pub struct SumConstraint<A, B, C, D>
 where A: ToVar<VarType=A> + Add<Output=A> + PartialEq, B: ToVar<VarType=A>, C: ToVar<VarType=A>, D: ToVar<VarType=A> {
@@ -72,6 +100,7 @@ impl<A> Constraint for VarSumConstraint<A> where A: ToVar<VarType=A> + Add<Outpu
     }
 }
 
+///! Constrains three finite domain variables so that A + B = C.
 #[derive(Debug, Clone)]
 pub struct FdSumConstraint<A, B, C>
 where A: ToVar<VarType=Fd>, B: ToVar<VarType=Fd>, C: ToVar<VarType=Fd> {
@@ -146,6 +175,7 @@ impl Constraint for VarFdSumConstraint {
     }
 }
 
+///! Constrains two finite domain variables so that A <= B.
 #[derive(Debug, Clone)]
 pub struct FdLessOrEqual<A, B>
 where A: ToVar<VarType=Fd>, B: ToVar<VarType=Fd> {
@@ -416,12 +446,15 @@ impl Constraint for VarFdUsizeConstraint {
     }
 }
 
+///! Constrains two variables, an element and a container, so that the element cannot be unified
+///! with anything in the container.
 pub struct AbsentConstraint<A, B, C>
 where A: ToVar, B: ToVar<VarType=A>, C: ToVar {
     elem: B,
     list: C,
 }
 
+///! Implementation of `AbsentConstraint`.  Don't use this directly, use `AbsentConstraint`.
 #[derive(Debug)]
 pub struct VarAbsentConstraint<A> where A: ToVar {
     elem: Var<A>,

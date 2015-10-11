@@ -1,5 +1,3 @@
-#![feature(fnbox)] // used by disjoint iterators.  Can be avoided by stupid tricks with FnMut and Option::take()
-#![feature(rc_unique)] // used when disjoint iters return tails, as an optimization
 #![feature(get_type_id)]
 #![feature(raw)] // used by VarWrapper::get_wrapped_value().
 #![feature(drain)] // used by StateProxyMerge (minor optimization)
@@ -16,5 +14,7 @@ pub mod list;
 pub mod iter;
 ///! Contains definitions of commonly used methods.  There's not much here, yet.
 pub mod builtins;
+///! Contains `Fd`, which represents a finite-domain value.
 pub mod finitedomain;
+///! Contains a number of built-in constraints.
 pub mod constraints;
