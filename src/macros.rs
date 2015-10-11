@@ -18,10 +18,11 @@ macro_rules! cond_builder {
 
 #[macro_export]
 macro_rules! conde {
-    ($state:ident, $($block:block),+) => ({
-        cond_builder!(conde, $state, $($block,)+)
-    })
+    ($state:ident, $($blocks:block),*) => (
+        conde_inner!($state, 0, conds:(), blocks:($($blocks,)*)).conde($state)
+    );
 }
+
 #[macro_export]
 macro_rules! condi {
     ($state:ident, $($block:block),+) => ({
@@ -59,4 +60,18 @@ macro_rules! method {
     ($name:ident($state:ident, $($var:ident: $varty:ty),*) $body:expr) => (
         method!($name($state, { args= } { vars=$($var: $varty,)* }) $body);
     );
+}
+
+#[macro_export]
+macro_rules! conde_inner {
+    ($state:ident, $count:expr, conds:($($counts:expr => $cblocks:expr,)*), blocks:($block:expr, $($blocks:expr,)*)) => (
+        conde_inner!($state, $count + 1, conds:($($counts => $cblocks,)* $count => $block,), blocks:($($blocks,)*))
+    );
+    ($state:ident, $count:expr, conds:($count0:expr => $block0:expr, $($counts:expr => $cblocks:expr,)*), blocks:()) => ({
+        $crate::iter::IterBuilder::new(move |pos, mut $state| {
+            if pos == $count0 { $block0.into() }
+            $(else if pos == $counts { $cblocks.into() })*
+            else { panic!() }
+        }, $count)
+    });
 }
