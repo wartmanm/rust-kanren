@@ -56,15 +56,13 @@ fn many_vars_macro() {
 fn simple_nested() {
     let mut state = State::new();
     let result = state.make_var();
-    let mut iter = IterBuilder::new();
-    iter.push(move |state| {
-        let mut subiter = IterBuilder::new();
-        subiter.push(move |mut state| {
+    let iter = IterBuilder::new(move |_, state| {
+        let subiter = IterBuilder::new(move |_, mut state| {
             state.unify(result, 1);
-            single(state)
-        });
+            state.into()
+        }, 1);
         subiter.conde(state)
-    });
+    }, 1);
     let mut iter = iter.conde(state);
     let result: Vec<i32> = VarIter::new(&mut iter, result).map(|x| x.unwrap()).collect();
     assert!(result == vec![1]);
@@ -74,23 +72,17 @@ fn simple_nested() {
 fn conditions() {
     let mut state = State::new();
     let result = state.make_var();
-    let mut runner = IterBuilder::new();
-    for i in (0..3) {
-        runner.push(move |mut state| {
-            state.unify(result, i);
-            let mut subrunner = IterBuilder::new();
-            for j in (0..3) {
-                subrunner.push(move |mut state| {
-                    state.unify(result, j);
-                    println!("{:?}", state);
-                    single(state)
-                });
-            }
-            subrunner.conde(state)
-        })
-    }
+    let runner = IterBuilder::new(move |i, mut state| {
+        state.unify(result, i);
+        let subrunner = IterBuilder::new(move |j, mut state| {
+            state.unify(result, j);
+            println!("{:?}", state);
+            state.into()
+        }, 3);
+        subrunner.conde(state)
+    }, 3);
     let mut iter = runner.conde(state);
-    let result: Vec<i32> = iter.var_iter(result).map(|x| x.unwrap()).collect();
+    let result: Vec<usize> = iter.var_iter(result).map(|x| x.unwrap()).collect();
     assert!(result == vec![0, 1, 2]);
 }
 

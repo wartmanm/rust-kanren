@@ -92,6 +92,32 @@ impl<S: Into<TailIterResult> + Any + 'static> TailIterator for AndIter<S> {
     }
 }
 
+struct CondaIter {
+    iter: Box<Iterator<Item=TailIterResult> + 'static>,
+    return_more: bool,
+}
+
+impl TailIterator for CondaIter {
+    fn next(mut self: Box<Self>) -> TailIterResult {
+        let mut next = match self.iter.next() {
+            Some(x) => x,
+            None => { return TailIterResult(None, None); }
+        };
+        loop {
+            next = match next {
+                TailIterResult(None, None) => { return TailIterResult(None, Some(self)); },
+                TailIterResult(Some(x), next_more) => {
+                    let more = if self.return_more { next_more } else { None };
+                    return TailIterResult(Some(x), more);
+                },
+                TailIterResult(None, Some(x)) => {
+                    x.next()
+                },
+            }
+        }
+    }
+}
+
 impl TailIterator {
     pub fn downcast_mut<T>(&mut self) -> Option<&mut T>
     where T: Any + 'static {
@@ -199,24 +225,19 @@ where F: Fn(usize, State) -> StateIter + 'static {
         TailIterResult(None, Some(Box::new(ChainManyIter { iter: Some(Box::new(iter)), chain: chain })))
     }
 
-    /*
     pub fn conda(self, state: State) -> StateIter {
-        if !state.ok() { return TailIterResult(None, None); }
-        let state = Rc::new(state);
-        let mut iter = self.fns.into_iter();
-        
-        TailIterResult(None, Some(wrap_fn(move || {
-            while let Some(f) = iter.next() {
-                let child = State::with_parent(state.clone());
-                let mut childiter = f(child);
-                if let Some(result) = childiter.next_boxed() {
-                    return TailIterResult(Some(result), Some(wrap_fn(move || childiter)));
-                }
-            }
-            TailIterResult(None, None)
-        })))
+        self.condau(state, true)
     }
-    */
+
+    pub fn condu(self, state: State) -> StateIter {
+        self.condau(state, false)
+    }
+
+    fn condau(self, state: State, return_more: bool) -> StateIter {
+        if !state.ok() { return TailIterResult(None, None); }
+        let iter = StateFnIter { f: self.f, state: Rc::new(state), len: self.len, pos: 0 };
+        TailIterResult(None, Some(Box::new(CondaIter { iter: Box::new(iter), return_more: return_more })))
+    }
 }
 
 pub type WrappedStateIter = Box<Fn(State) -> TailIterResult + 'static>;

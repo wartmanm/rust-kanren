@@ -22,24 +22,17 @@ macro_rules! conde {
         conde_inner!($state, 0, conds:(), blocks:($($blocks,)*)).conde($state)
     );
 }
-
-#[macro_export]
-macro_rules! condi {
-    ($state:ident, $($block:block),+) => ({
-        cond_builder!(condi, $state, $($block,)+)
-    })
-}
 #[macro_export]
 macro_rules! conda {
-    ($state:ident, $($block:block),+) => ({
-        cond_builder!(conda, $state, $($block,)+)
-    })
+    ($state:ident, $($blocks:block),*) => (
+        conde_inner!($state, 0, conds:(), blocks:($($blocks,)*)).conda($state)
+    );
 }
 #[macro_export]
 macro_rules! condu {
-    ($state:ident, $($block:block),+) => ({
-        cond_builder!(condu, $state, $($block,)+)
-    })
+    ($state:ident, $($blocks:block),*) => (
+        conde_inner!($state, 0, conds:(), blocks:($($blocks,)*)).condu($state)
+    );
 }
 
 #[macro_export]
