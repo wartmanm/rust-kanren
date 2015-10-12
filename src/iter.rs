@@ -177,18 +177,20 @@ impl TailIterResult {
     }
     pub fn into_iter(self) -> TailIterIter { TailIterIter(self) }
     pub fn next(&mut self) -> Option<State> {
-        let mut tmp = TailIterResult(None, None);
-        ::std::mem::swap(&mut tmp, self);
-        match tmp {
-            TailIterResult(None, None) => None,
-            TailIterResult(Some(x), None) => Some(x),
-            TailIterResult(None, Some(x)) => {
-                *self = x.next();
-                self.next()
-            },
-            TailIterResult(Some(x), Some(more)) => {
-                *self = TailIterResult(None, Some(more));
-                Some(x)
+        loop {
+            let mut tmp = TailIterResult(None, None);
+            ::std::mem::swap(&mut tmp, self);
+            match tmp {
+                TailIterResult(None, None) => { return None; }
+                TailIterResult(Some(x), None) => { return Some(x); }
+                TailIterResult(None, Some(x)) => {
+                    *self = x.next();
+                    continue;
+                },
+                TailIterResult(Some(x), Some(more)) => {
+                    *self = TailIterResult(None, Some(more));
+                    return Some(x);
+                }
             }
         }
     }
