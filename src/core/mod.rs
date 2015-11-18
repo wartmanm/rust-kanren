@@ -19,7 +19,6 @@ use std::collections::HashSet;
 
 use core::ExactVal::*;
 use core::VarRef::*;
-use core::ExactValPtr::*;
 
 
 ///! Wrapper for a usize, used as a unique variable identifier.
@@ -105,17 +104,6 @@ trait BoxedConstraint: Debug {
 }
 
 struct ConstraintWrapper<A: Constraint + Clone>(A);
-
-///! Helper trait for cloning VarWrappers.  Has a blanket impl for all VarWrapper + Clone.
-pub trait VarWrapperClone {
-    fn clone_boxed(&self) -> Box<VarWrapper>;
-}
-
-impl<T> VarWrapperClone for T where T: VarWrapper + Clone {
-    fn clone_boxed(&self) -> Box<VarWrapper> {
-        Box::new(self.clone())
-    }
-}
 
 type RcConstraint = Rc<Box<BoxedConstraint>>;
 
@@ -209,7 +197,7 @@ impl UnifyResult {
 }
 
 ///! Trait implemented by all variable types.
-pub trait VarWrapper : Debug + 'static + Any + VarWrapperClone {
+pub trait VarWrapper : Debug + 'static + Any {
     ///! Compare two variables for equality.  For containers this entails unifying the contained
     ///! variables; for everything else it's no different from PartialEq.
     fn unify_with(&self, other: &VarWrapper, state: &mut StateProxy) -> UnifyResult;
@@ -256,11 +244,13 @@ trait FollowRef {
 
     ///! Follow unlimited levels of indirection to find the value of a variable, the UntypedVar
     ///! that directly refers to it, and its type.
-    fn follow_ref(&self, mut id: UntypedVar) -> (UntypedVar, &ExactVal, TypeId) {
+    fn follow_ref(&self, mut id: UntypedVar) -> (UntypedVar, Option<&VarWrapper>, TypeId) {
         loop {
             match self.get_ref(id) {
                 &EqualTo(x) => { id = x; },
-                &Exactly(ref x, ty) => { return (id, x, ty); },
+                &Exactly(ref x, ty) => {
+                    return (id, unsafe { self.var_opt(x) }, ty);
+                },
             }
         }
     }
@@ -277,33 +267,30 @@ trait FollowRef {
     }
 
     ///! Follow unlimited levels of indirection to find the value which a variable is equal to.
-    fn get_exact_val(&self, id: UntypedVar) -> &ExactVal {
+    fn get_exact_val(&self, id: UntypedVar) -> Option<&VarWrapper> {
         self.follow_ref(id).1
     }
 
     fn get_exact_val_opt<A>(&self, id: UntypedVar) -> Option<&A> where A: VarWrapper {
-        self.get_exact_val(id).opt().map(|x| x.get_wrapped_value())
+        self.get_exact_val(id).map(|x| x.get_wrapped_value())
+    }
+
+    #[inline(always)]
+    unsafe fn var_opt<'var>(&'var self, var: &'var ExactVal) -> Option<&'var VarWrapper> {
+        var.opt_ptr().map(|x| &*x)
     }
 }
 
 ///! Holds the final value of a walked variable.  Fresh is used for unset variables; it doesn't have
 ///! to exist, but makes it easier to identify type errors.
-#[derive(Debug)]
 enum ExactVal {
     Value(Box<VarWrapper>), 
-    Fresh,
-}
-
-///! Holds a raw pointer to the value held by an ExactVal.  This is used inside untyped_unify() to
-///! free up &mut self to pass into the variables being unified.
-enum ExactValPtr {
     ValuePtr(*const VarWrapper),
-    FreshPtr,
+    Fresh,
 }
 
 ///! A variable can either be set to a specific value (which can be no value) or equal to another
 ///! variable.
-#[derive(Debug)]
 enum VarRef {
     Exactly(ExactVal, TypeId),
     EqualTo(UntypedVar),
@@ -325,8 +312,9 @@ impl Clone for VarMap {
                 EqualTo(x) => EqualTo(x),
                 Exactly(Fresh, t) => Exactly(Fresh, t),
                 Exactly(Value(ref other), t) => {
-                    Exactly(Value(other.clone_boxed()), t)
+                    Exactly(ValuePtr(&**other as *const VarWrapper), t)
                 },
+                Exactly(ValuePtr(other), t) => Exactly(ValuePtr(other), t),
             };
             (k, v)
         }).collect();
@@ -380,16 +368,11 @@ impl ExactVal {
     fn new<A: VarWrapper + 'static>(value: A) -> ExactVal {
         Value(Box::new(value))
     }
-    unsafe fn as_ref(&self) -> ExactValPtr {
-        match self {
-            &Fresh => FreshPtr,
-            &Value(ref x) => ValuePtr(&**x as *const VarWrapper)
-        }
-    }
-    fn opt(&self) -> Option<&VarWrapper> {
+    fn opt_ptr(&self) -> Option<*const VarWrapper> {
         match self {
             &Fresh => None,
-            &Value(ref x) => Some(&**x),
+            &Value(ref x) => Some(&**x as *const VarWrapper),
+            &ValuePtr(x) => Some(x),
         }
     }
 }
@@ -399,7 +382,7 @@ impl VarRetrieve for State {
         self.get_exact_val_opt(var.var)
     }
     fn get_untyped(&self, var: UntypedVar) -> Option<&VarWrapper> {
-        self.get_exact_val(var).opt()
+        self.get_exact_val(var)
     }
 }
 
@@ -623,7 +606,7 @@ impl<'a> VarRetrieve for StateProxy<'a> {
         self.get_exact_val_opt(var.var)
     }
     fn get_untyped(&self, var: UntypedVar) -> Option<&VarWrapper> {
-        self.get_exact_val(var).opt()
+        self.get_exact_val(var)
     }
 }
 
@@ -690,8 +673,14 @@ impl<'a> StateProxy<'a> {
             let (a_id, a_val, typea) = self.follow_ref(a);
             let (b_id, b_val, typeb) = self.follow_ref(b);
             
+            let a_val = a_val.map(|x| x as *const _);
+            let b_val = b_val.map(|x| x as *const _);
+            
+            if a_id == b_id {
+                return true;
+            }
             // check for reference equality
-            if a_val as *const ExactVal == b_val as *const ExactVal {
+            if a_val.is_some() && a_val == b_val {
                 return true;
             }
             assert!(typea == typeid);
@@ -702,13 +691,13 @@ impl<'a> StateProxy<'a> {
             // (so we'll be okay when it resizes) and there are no safe operations which remove values
             // from it.
             // TODO: it's still gross, though.
-            unsafe { (a_val.as_ref(), a_id, b_val.as_ref(), b_id) }
+            (a_val, a_id, b_val, b_id)
         };
         let (eq_dst, eq_src, src_val) = match (a_val, b_val) {
-            (FreshPtr, b_ex) => (a_id, b_id, b_ex),
-            (a_ex, FreshPtr) => (b_id, a_id, a_ex),
-            (ValuePtr(a_ex), ValuePtr(b_ex)) => {
-                let (a_ex, b_ex) = unsafe { (&*a_ex, &*b_ex) };
+            (None, b_ex) => (a_id, b_id, b_ex),
+            (a_ex, None) => (b_id, a_id, a_ex),
+            (Some(a_ex), Some(b_ex)) => {
+                let (a_ex, b_ex): (&VarWrapper, &VarWrapper) = unsafe { (&*a_ex, &*b_ex) };
                 //println!("comparing {:?} and {:?}", a_ex, b_ex);
                 let equals = a_ex.unify_with(&*b_ex, self);
                 let ok = match equals.0 {
@@ -730,18 +719,17 @@ impl<'a> StateProxy<'a> {
         };
 
         let src_val: VarRef = match src_val {
-            ValuePtr(x) => unsafe {
+            Some(x) => unsafe {
                 let x = &*x;
 
                 if use_occurs_check && self.occurs_check_nofollow(TypedVar(eq_dst, typeid), eq_src, x) {
                     self.fail();
                     return false;
                 }
-
                 if x.uses_overwrite() { EqualTo(eq_src) }
-                else { Exactly(Value(x.clone_boxed()), typeid) }
+                else { Exactly(ValuePtr(x), typeid) }
             },
-            FreshPtr => EqualTo(eq_src),
+            None => EqualTo(eq_src),
         };
         //println!("assigning {:?} equal to {:?} (= {:?})", eq_dst, eq_src, src_val);
         self.parent.proxy_eqs.insert(eq_dst, src_val);
@@ -758,6 +746,7 @@ impl<'a> StateProxy<'a> {
                     &EqualTo(new_id) => { id = new_id },
                     &Exactly(Fresh, _) => { return None; }
                     &Exactly(Value(ref val), _) => { return Some(val.get_wrapped_value()); },
+                    &Exactly(ValuePtr(val), _) => unsafe { return Some((&*val).get_wrapped_value()); },
                 },
                 None => { return None; },
             }
@@ -798,7 +787,7 @@ impl<'a> StateProxy<'a> {
     pub fn occurs_check_typed<A>(&self, elem: TypedVar, list: Var<A>) -> bool
     where A : VarWrapper {
         let (list, listval, _) = self.follow_ref(list.untyped());
-        match listval.opt() {
+        match listval {
             Some(listval) => self.occurs_check_nofollow(elem, list, listval),
             None => list == elem.untyped(),
         }
@@ -807,7 +796,7 @@ impl<'a> StateProxy<'a> {
     #[inline(always)]
     pub fn occurs_check(&self, elem: TypedVar, list: UntypedVar) -> bool {
         let (list, listval, _) = self.follow_ref(list);
-        match listval.opt() {
+        match listval {
             Some(listval) => self.occurs_check_nofollow(elem, list, listval),
             None => list == elem.untyped(),
         }
@@ -954,9 +943,24 @@ where A : VarWrapper {
         write!(fmt, "Var({})", self.var.0)
     }
 }
-
 impl Debug for State {
     fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
+
+        fn debug_var_ref(me: &State, val: &VarRef, fmt: &mut Formatter) -> fmt::Result {
+            match *val {
+                EqualTo(x) => write!(fmt, "EqualTo({:?})", x),
+                Exactly(ref x, ty) => {
+                    let x = unsafe { me.var_opt(x) };
+                    try!(write!(fmt, "Exactly("));
+                    try!(match x {
+                        Some(value) => write!(fmt, "Value({:?})", value),
+                        None => write!(fmt, "Fresh")
+                    });
+                    write!(fmt, ", {:?})", ty)
+                }
+            }
+        }
+
         try!(writeln!(fmt, "State {{"));
         try!(writeln!(fmt, "\tid: {:?}", self.eqs.id));
         try!(writeln!(fmt, "\tok: {:?}", self.eqs.ok));
@@ -964,7 +968,8 @@ impl Debug for State {
         try!(writeln!(fmt, "\tproxy.ok: {:?}", self.proxy_eqs.ok));
         try!(writeln!(fmt, "\tproxy.eqs: {{"));
         for &(k, ref v) in self.proxy_eqs.iter() {
-            try!(write!(fmt, "\t\t{:?} => {:?}", k, v));
+            try!(write!(fmt, "\t\t{:?} => ", k));
+            try!(debug_var_ref(self, v, fmt));
         }
         try!(writeln!(fmt, "\t}}"));
 
@@ -994,6 +999,7 @@ impl Debug for State {
                             match x {
                                 &Fresh => try!(writeln!(fmt, "Fresh")),
                                 &Value(ref y) => try!(writeln!(fmt, "{:?}", y)),
+                                &ValuePtr(y) => try!(writeln!(fmt, "{:?}", unsafe { &*y })),
                             }
                             break;
                         }

@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::*;
 use core::{State, UntypedVar, Var, FollowRef, VarWrapper};
-use core::ExactVal::*;
 use std::fmt::{self, Debug, Display};
 
 ///! Reifies variables, providing a consistent, unique identifier for unset variables.  For
@@ -42,9 +41,9 @@ impl<'a> Reifier<'a> {
 
     pub fn reify<A: VarWrapper>(&mut self, var: Var<A>) -> Reified<'a, A> {
         let (walked, value, _) = self.parent.follow_ref(var.var);
-        match *value {
-            Value(ref x) => Reified::Value(x.get_wrapped_value()),
-            Fresh => {
+        match value {
+            Some(x) => Reified::Value(x.get_wrapped_value()),
+            None => {
                 match self.eqs.entry(walked) {
                     Occupied(x) => Reified::Unset(*x.get()),
                     Vacant(x) => {

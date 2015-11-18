@@ -3,7 +3,7 @@ use std::cmp::Ordering::*;
 use std::collections::{BTreeSet, HashMap};
 use std::collections::hash_map::Entry::*;
 use std::rc::Rc;
-use core::{UntypedVar, State, FollowRef, VarWrapper, Unifier, ExactVal};
+use core::{UntypedVar, State, FollowRef, VarWrapper, Unifier};
 use core::VarRef::*;
 use core::ExactVal::*;
 use iter::{StateIter, single, TailIter};
@@ -67,14 +67,15 @@ struct GatheredValues {
 }
 
 impl GatheredValues {
-    fn new<'a, I>(state: &State, in_vars: I) -> GatheredValues where I: IntoIterator<Item=(UntypedVar, &'a ExactVal)> {
+    fn new<'a, I>(state: &State, in_vars: I) -> GatheredValues
+    where I: IntoIterator<Item=(UntypedVar, Option<&'a VarWrapper>)> {
         let mut counted = BTreeSet::new();
         let mut vars = HashMap::new();
 
         for (var, val) in in_vars {
             let var = state.follow_id(var);
             //let val = state.get_ref(var);
-            if let &Value(ref val) = val {
+            if let Some(val) = val {
                 if val.value_count() > 1 && !vars.contains_key(&var) {
                     counted.insert(CountedVar(var, val.value_count()));
                     vars.insert(var, val.value_count());
@@ -94,7 +95,7 @@ pub fn assign_all_values(state: State) -> StateIter {
             .flat_map(|state| state.eqs.iter())
             .flat_map(|&(var, ref val)| match val {
                 &EqualTo(_) => None.into_iter(),
-                &Exactly(ref x, _) => Some((var, x)).into_iter(),
+                &Exactly(ref x, _) => Some((var, unsafe { state.var_opt(x) })).into_iter(),
             });
         GatheredValues::new(&state, iter)
     };
@@ -104,7 +105,7 @@ pub fn assign_all_values(state: State) -> StateIter {
 ///! Assign single fixed values to any set of variables, like `Fd`s, that may not have one.
 pub fn assign_values<I>(state: State, in_vars: I) -> StateIter where I: IntoIterator<Item=UntypedVar> {
     let gathered = {
-        let iter = in_vars.into_iter().map(|var| { (var, state.follow_ref(var).1) });
+        let iter = in_vars.into_iter().map(|var| { (var, state.get_exact_val(var)) });
         GatheredValues::new(&state, iter)
     };
     assign_values_inner(state, gathered.counted, gathered.vars)
@@ -122,8 +123,8 @@ fn assign_values_inner(state: State, mut counted: BTreeSet<CountedVar>, mut vars
     //let mut counted = counted.clone();
     //let mut vars = vars.clone();
 
-    let val: Option<VarWrapperIter> = match state.follow_ref(var.0).1 {
-        &Value(ref x) => {
+    let val: Option<VarWrapperIter> = match state.get_exact_val(var.0) {
+        Some(x) => {
             //println!("adding valueiter for {:?}", x);
             if x.value_count() == 1 { // should be impossible but oh well
                 None
@@ -131,7 +132,7 @@ fn assign_values_inner(state: State, mut counted: BTreeSet<CountedVar>, mut vars
                 Some(x.value_iter())
             }
         },
-        &Fresh => panic!("should be impossible!"),
+        None => panic!("should be impossible!"),
     };
     let val = match val {
         Some(x) => x,
@@ -144,36 +145,40 @@ fn assign_values_inner(state: State, mut counted: BTreeSet<CountedVar>, mut vars
         //println!("iterating over {:?} with value {:?}", var.0, state.follow_ref(var.0).1.opt().unwrap());
         let mut counted = counted.clone();
         let mut vars = vars.clone();
-        for &(key, ref val) in state.eqs.iter() {
+        for &(key, ref some_val) in state.eqs.iter() {
             let var_entry = vars.entry(key);
-            match val {
-                &Exactly(Value(ref val), _) => {
-                    match var_entry {
-                        Occupied(mut x) => {
-                            //println!("{:?} old len: {}, new len: {}", key, x.get(), val.value_count());
-                            if *x.get() != val.value_count() {
-                                counted.remove(&CountedVar(key, *x.get()));
-                                if val.value_count() > 1 {
-                                    counted.insert(CountedVar(key, val.value_count()));
-                                    x.insert(val.value_count());
-                                } else {
-                                    x.remove();
+            match *some_val {
+                Exactly(ref exactval, _) => {
+                    let val_opt = unsafe { state.var_opt(exactval) };
+                    if let Some(val) = val_opt {
+                        match var_entry {
+                            Occupied(mut x) => {
+                                //println!("{:?} old len: {}, new len: {}", key, x.get(), val.value_count());
+                                if *x.get() != val.value_count() {
+                                    counted.remove(&CountedVar(key, *x.get()));
+                                    if val.value_count() > 1 {
+                                        counted.insert(CountedVar(key, val.value_count()));
+                                        x.insert(val.value_count());
+                                    } else {
+                                        x.remove();
+                                    }
                                 }
+                            },
+                            Vacant(x) => {
+                                counted.insert(CountedVar(key, val.value_count()));
+                                x.insert(val.value_count());
                             }
-                        },
-                        Vacant(x) => {
-                            counted.insert(CountedVar(key, val.value_count()));
-                            x.insert(val.value_count());
                         }
+                    } else {
+                        panic!("impossible!");
                     }
                 },
-                &Exactly(Fresh, _) => panic!("impossible!"),
-                &EqualTo(_) => {
+                EqualTo(_) => {
                     if let Occupied(x) = var_entry {
                         counted.remove(&CountedVar(key, *x.get()));
                         x.remove();
                     }
-                }
+                },
             }
         }
         assign_values_inner(state, counted, vars)
