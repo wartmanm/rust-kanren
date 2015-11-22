@@ -2,6 +2,7 @@ use core::{ToVar, StateProxy, VarWrapper, Var, Unifier, VarStore, UnifyResult, U
 use std::rc::Rc;
 use std::marker::PhantomData;
 use list::List;
+use ref_slice::ref_slice;
 
 // TODO: Once negative bounds work, add a blanket impl for all but Var and get rid of all of
 // this.
@@ -172,10 +173,11 @@ impl<A, B> VarWrapper for Result<Var<A>, Var<B>> where A: ToVar, B: ToVar {
         }).into()
     }
     fn var_iter<'a>(&'a self) -> Option<Box<Iterator<Item=UntypedVar> + 'a>> {
-        match self {
-            &Ok(ref x) => Some(Box::new(::std::slice::ref_slice(x).iter().map(|x| x.untyped()))),
-            &Err(ref x) => Some(Box::new(::std::slice::ref_slice(x).iter().map(|x| x.untyped()))),
-        }
+        let untyped = match *self {
+            Ok(ref x) => x.untyped_ref(),
+            Err(ref x) => x.untyped_ref(),
+        };
+        Some(Box::new(ref_slice(untyped).iter().cloned()))
     }
     fn occurs_check(&self, state: &StateProxy, other: UntypedVar) -> bool {
         let selfvar = match self {

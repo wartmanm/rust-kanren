@@ -28,8 +28,8 @@ impl Iterator for TailIterIter {
 
 pub type TailIter = Box<TailIterator>;
 
-///! The trait used for the continuation portion of a TailI`terResult` iterator.
-trait TailIterator: Any {
+///! The trait used for the continuation portion of a `TailIterResult` iterator.
+pub trait TailIterator: Any {
     fn next(self: Box<Self>) -> TailIterResult;
 }
 

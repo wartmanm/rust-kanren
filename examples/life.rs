@@ -164,8 +164,8 @@ fn cell_survival(state: State, focus: Var<bool>, sum: Var<i32>, result: Var<bool
 
 fn step(state: State, old: &CellGrid, new: &CellGrid) -> StateIter {
     let mut iter = single(state);
-    for y in (0..old.size.1) {
-        for x in (0..old.size.0) {
+    for y in 0..old.size.1 {
+        for x in 0..old.size.0 {
             let neighbors = Box::new(old.neighbors(x, y));
             let oldcell = old.get(x, y).unwrap();
             let newcell = new.get(x, y).unwrap();

@@ -1,6 +1,6 @@
-#![feature(ref_slice)]
 #[macro_use]
 extern crate kanren;
+extern crate ref_slice;
 
 use kanren::core::{State, Unifier, Var, ToVar, VarStore};
 use kanren::core::{VarWrapper, StateProxy, UnifyResult, UntypedVar};
@@ -16,6 +16,7 @@ use std::fmt::{self, Write, Debug};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::io;
+use ref_slice::ref_slice;
 
 #[derive(Debug, Copy, Clone)]
 enum Tree {
@@ -241,7 +242,7 @@ impl VarWrapper for Tree {
     
     fn var_iter<'a>(&'a self) -> Option<Box<Iterator<Item=UntypedVar> + 'a>> {
         fn slicer<'b, A: Copy>(a: &'b A) -> Option<Box<Iterator<Item=A> + 'b>> {
-            Some(Box::new(::std::slice::ref_slice(a).iter().map(|x| *x)))
+            Some(Box::new(ref_slice(a).iter().map(|x| *x)))
         }
         match *self {
             VarSym(ref a) => slicer(a.untyped_ref()),

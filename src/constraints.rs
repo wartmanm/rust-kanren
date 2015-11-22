@@ -42,7 +42,7 @@ where A: ToVar<VarType=A> + Add<Output=A> + PartialEq, B: ToVar<VarType=A>, C: T
     r: C,
     result: D,
 }
-type VarSumConstraint<A> = SumConstraint<A, Var<A>, Var<A>, Var<A>>;
+pub type VarSumConstraint<A> = SumConstraint<A, Var<A>, Var<A>, Var<A>>;
 
 impl<A, B, C, D> ToConstraint for SumConstraint<A, B, C, D>
 where A: ToVar<VarType=A> + Add<Output=A> + Sub<Output=A> + PartialEq + Clone, B: ToVar<VarType=A>, C: ToVar<VarType=A>, D: ToVar<VarType=A> {
@@ -108,7 +108,7 @@ where A: ToVar<VarType=Fd>, B: ToVar<VarType=Fd>, C: ToVar<VarType=Fd> {
     r: B,
     result: C,
 }
-type VarFdSumConstraint = FdSumConstraint<Var<Fd>, Var<Fd>, Var<Fd>>;
+pub type VarFdSumConstraint = FdSumConstraint<Var<Fd>, Var<Fd>, Var<Fd>>;
 
 impl<A, B, C> ToConstraint for FdSumConstraint<A, B, C>
 where A: ToVar<VarType=Fd>, B: ToVar<VarType=Fd>, C: ToVar<VarType=Fd> {
@@ -182,7 +182,7 @@ where A: ToVar<VarType=Fd>, B: ToVar<VarType=Fd> {
     l: A,
     r: B,
 }
-type VarFdLessOrEqual = FdLessOrEqual<Var<Fd>, Var<Fd>>;
+pub type VarFdLessOrEqual = FdLessOrEqual<Var<Fd>, Var<Fd>>;
 
 impl<A, B> FdLessOrEqual<A, B>
 where A: ToVar<VarType=Fd>, B: ToVar<VarType=Fd> {
@@ -400,7 +400,7 @@ where A: ToVar<VarType=Fd>, B: ToVar<VarType=usize> {
     fd: A,
     u: B,
 }
-type VarFdUsizeConstraint = FdUsizeConstraint<Var<Fd>, Var<usize>>;
+pub type VarFdUsizeConstraint = FdUsizeConstraint<Var<Fd>, Var<usize>>;
 
 impl<A, B> ToConstraint for FdUsizeConstraint<A, B>
 where A: ToVar<VarType=Fd>, B: ToVar<VarType=usize> {
@@ -535,7 +535,6 @@ fn check_unify(state: &mut StateProxy, list: &mut Cow<Vec<UntypedVar>>, elem: Un
 
 impl<A> Constraint for VarAbsentConstraint<A> where A: ToVar {
     fn update(&self, state: &mut StateProxy) -> ConstraintResult<VarAbsentConstraint<A>> {
-        use core::ConstraintResult::*;
         //let mut me = Cow::Borrowed(self);
         //push_tail(&mut me, state);
 

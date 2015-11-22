@@ -536,7 +536,7 @@ fn occurs_check_test() {
     if state.ok() {
         let mut contents = Vec::new();
         let mut node = list1;
-        for _ in (1..10) {
+        for _ in 1..10 {
             let (h, t) = match state.get_value(node).unwrap() {
                 &List::Pair(h, t) => (h, t),
                 _ => panic!(),

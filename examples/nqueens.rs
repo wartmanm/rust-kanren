@@ -97,7 +97,7 @@ pub fn main() {
             let y = *state.get_value(y).unwrap();
 
             let mut black_square = y % 2 == 0;
-            for draw_x in (0..n) {
+            for draw_x in 0..n {
                 match black_square {
                     _ if draw_x == x => print!("♕ "),
                     false => print!("  "),

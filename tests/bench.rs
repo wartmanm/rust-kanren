@@ -4,7 +4,6 @@ extern crate kanren;
 
 extern crate test;
 use test::Bencher;
-use std::rc::Rc;
 
 use kanren::core::{State, Unifier, Var, ToVar, VarStore};
 use kanren::iter::{StateIter, single}; use kanren::core::vars::__;
@@ -68,7 +67,7 @@ value_wrapper!(Animals);
 value_wrapper!(Colors);
 value_wrapper!(Drinks);
 
-type VarHouse = (Var<Nationalities>, Var<Rc<Colors>>, Var<Animals>, Var<Drinks>, Var<Cigarettes>);
+type VarHouse = (Var<Nationalities>, Var<Colors>, Var<Animals>, Var<Drinks>, Var<Cigarettes>);
 
 #[derive(Default, Debug, Clone, Copy)]
 struct House {
@@ -83,7 +82,7 @@ impl ToVar for House {
     type VarType = VarHouse;
     fn into_var<U: VarStore+Unifier>(self, state: &mut U) -> Var<VarHouse> {
         let nationality = self.nationality.map(|x| state.make_var_of(x)).unwrap_or(state.make_var());
-        let color = self.color.map(|x| state.make_var_of(Rc::new(x))).unwrap_or(state.make_var());
+        let color = self.color.map(|x| state.make_var_of(x)).unwrap_or(state.make_var());
         let pet = self.pet.map(|x| state.make_var_of(x)).unwrap_or(state.make_var());
         let drink = self.drink.map(|x| state.make_var_of(x)).unwrap_or(state.make_var());
         let cigarette = self.cigarette.map(|x| state.make_var_of(x)).unwrap_or(state.make_var());
