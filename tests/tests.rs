@@ -558,3 +558,13 @@ fn occurs_check_2() {
     state.unify(end, start);
     assert!(!state.ok());
 }
+
+#[test]
+fn fd_unify() {
+    let mut state = State::new();
+    let f = state.make_var_of(Fd::new_values(vec![0,1,2]));
+    fresh!(state, f2);
+    state.unify(f, f2);
+    state.unify(f, Fd::new_single(1));
+    assert!(state.get_value(f2) == Some(&Fd::new_single(1)));
+}
