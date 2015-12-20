@@ -2,7 +2,7 @@ use std::any::TypeId;
 use std::fmt::{self, Debug, Formatter};
 use core::{ConstraintResult, StateProxy, UntypedVar, Constraint, State, Var, ToVar, FollowRef, Unifier, VarMap, VarWrapper};
 use core::ConstraintResult::*;
-use core::VarRef::*;
+use core::ExactVarRef::*;
 
 ///! The Disequal constraint enforces that its arguments will never have equal values.  Don't use
 ///! this directly, use `kanren::constraints::Disequal` instead.
@@ -87,8 +87,8 @@ impl Disequal {
             let eqvar = match proxy.get_ref(k) {
                 // We don't care about values added by overwrite() -- they indicate that something
                 // had to be updated (so it passes) but the value will be gone when we roll back
-                &Exactly(..) => { continue; },
                 &EqualTo(eqvar) => eqvar,
+                _ => { continue; },
             };
 
             if all_unchanged && self.relevant(k) {

@@ -16,9 +16,11 @@ use std::marker::PhantomData;
 use std::any::*;
 use std::raw::TraitObject;
 use std::collections::HashSet;
+use std::mem;
 
-use core::ExactVal::*;
-use core::VarRef::*;
+//use core::ExactVal::*;
+//use core::VarRef::*;
+use core::ExactVarRef::*;
 
 
 ///! Wrapper for a usize, used as a unique variable identifier.
@@ -246,10 +248,10 @@ trait FollowRef {
     ///! that directly refers to it, and its type.
     fn follow_ref(&self, mut id: UntypedVar) -> (UntypedVar, Option<&VarWrapper>, TypeId) {
         loop {
-            match self.get_ref(id) {
-                &EqualTo(x) => { id = x; },
-                &Exactly(ref x, ty) => {
-                    return (id, unsafe { self.var_opt(x) }, ty);
+            match self.get_ref(id).split() {
+                Err(x) => { id = x },
+                Ok(x) => {
+                    return (id, unsafe { self.var_opt(x) }, x.get_type());
                 },
             }
         }
@@ -283,18 +285,29 @@ trait FollowRef {
 
 ///! Holds the final value of a walked variable.  Fresh is used for unset variables; it doesn't have
 ///! to exist, but makes it easier to identify type errors.
-enum ExactVal {
-    Value(Box<VarWrapper>), 
-    ValuePtr(*const VarWrapper),
-    Fresh,
-}
+//enum ExactVal {
+    //Value(Box<VarWrapper>), 
+    //ValuePtr(*const VarWrapper),
+    //Fresh,
+//}
 
 ///! A variable can either be set to a specific value (which can be no value) or equal to another
 ///! variable.
-enum VarRef {
-    Exactly(ExactVal, TypeId),
+enum ExactVarRef<T: Exactness> {
+    Exactly(Box<VarWrapper>, TypeId),
+    ExactPtr(*const VarWrapper, TypeId),
+    Fresh(TypeId),
     EqualTo(UntypedVar),
+    _Type(PhantomData<T>),
 }
+type ExactVal = ExactVarRef<Exact>;
+type VarRef = ExactVarRef<Ref>;
+
+trait Exactness { }
+enum Exact { }
+enum Ref { }
+impl Exactness for Exact { }
+impl Exactness for Ref { }
 
 
 ///! Stores Var -> value mappings.  An implementation detail required by
@@ -310,11 +323,12 @@ impl Clone for VarMap {
         let new_eqs = self.iter().map(|&(k, ref v)| {
             let v = match *v {
                 EqualTo(x) => EqualTo(x),
-                Exactly(Fresh, t) => Exactly(Fresh, t),
-                Exactly(Value(ref other), t) => {
-                    Exactly(ValuePtr(&**other as *const VarWrapper), t)
+                Fresh(t) => Fresh(t),
+                Exactly(ref other, t) => {
+                    ExactPtr(&**other as *const VarWrapper, t)
                 },
-                Exactly(ValuePtr(other), t) => Exactly(ValuePtr(other), t),
+                ExactPtr(other, t) => ExactPtr(other, t),
+                _Type(..) => { unreachable!(); },
             };
             (k, v)
         }).collect();
@@ -364,17 +378,47 @@ impl<A> ToVar for Var<A> where A : VarWrapper {
     }
 }
 
+impl VarRef {
+    fn as_exact(&self) -> Option<&ExactVal> {
+        match *self {
+            EqualTo(..) => None,
+            ref x @ _ => Some(unsafe { mem::transmute(x) }),
+        }
+    }
+    fn split(&self) -> Result<&ExactVal, UntypedVar> {
+        match *self {
+            EqualTo(x) => Err(x),
+            ref x @ _ => Ok(unsafe { mem::transmute(x) }),
+        }
+    }
+}
+
 impl ExactVal {
     fn new<A: VarWrapper + 'static>(value: A) -> ExactVal {
-        Value(Box::new(value))
+        Exactly(Box::new(value), TypeId::of::<A>())
     }
     fn opt_ptr(&self) -> Option<*const VarWrapper> {
         match self {
-            &Fresh => None,
-            &Value(ref x) => Some(&**x as *const VarWrapper),
-            &ValuePtr(x) => Some(x),
+            &Fresh(_) => None,
+            &Exactly(ref x, _) => Some(&**x as *const VarWrapper),
+            &ExactPtr(x, _) => Some(x),
+            &EqualTo(..) | &_Type(..) => { unreachable!(); },
         }
     }
+    fn get_type(&self) -> TypeId {
+        match self {
+            &Fresh(ty) => ty,
+            &Exactly(_, ty) => ty,
+            &ExactPtr(_, ty) => ty,
+            &EqualTo(..) | &_Type(..) => { unreachable!(); },
+        }
+    }
+    fn as_var_ref(self) -> VarRef {
+        unsafe { mem::transmute(self) }
+    }
+    //fn as_var_ref_ref(&self) -> &VarRef {
+        //unsafe { mem::transmute(self) }
+    //}
 }
 
 impl VarRetrieve for State {
@@ -655,7 +699,7 @@ impl<'a> StateProxy<'a> {
 
     pub unsafe fn overwrite_var<A>(&mut self, var: Var<A>, new_value: A)
     where A: VarWrapper + 'static {
-        self.parent.proxy_eqs.insert(var.untyped(), Exactly(ExactVal::new(new_value), TypeId::of::<A>()));
+        self.parent.proxy_eqs.insert(var.untyped(), ExactVal::new(new_value).as_var_ref());
     }
 
     ///! Unify two variables.  Inserts an EqualTo if one or both are unset, or calls _equals_ if
@@ -710,7 +754,7 @@ impl<'a> StateProxy<'a> {
                         debug_assert!((&*newval).get_type_id() == typeid);
                         debug_assert!(a_ex.uses_overwrite());
                         self.parent.proxy_eqs.insert(a_id, EqualTo(b_id));
-                        self.parent.proxy_eqs.insert(b_id, Exactly(Value(newval), typeid));
+                        self.parent.proxy_eqs.insert(b_id, Exactly(newval, typeid));
                         true
                     },
                 };
@@ -727,7 +771,7 @@ impl<'a> StateProxy<'a> {
                     return false;
                 }
                 if x.uses_overwrite() { EqualTo(eq_src) }
-                else { Exactly(ValuePtr(x), typeid) }
+                else { ExactPtr(x, typeid) }
             },
             None => EqualTo(eq_src),
         };
@@ -744,9 +788,10 @@ impl<'a> StateProxy<'a> {
             match self.parent.proxy_eqs.get(&id).or_else(|| self.parent.eqs.get(&id)) {
                 Some(x) => match x {
                     &EqualTo(new_id) => { id = new_id },
-                    &Exactly(Fresh, _) => { return None; }
-                    &Exactly(Value(ref val), _) => { return Some(val.get_wrapped_value()); },
-                    &Exactly(ValuePtr(val), _) => unsafe { return Some((&*val).get_wrapped_value()); },
+                    &Fresh(_) => { return None; }
+                    &Exactly(ref val, _) => { return Some(val.get_wrapped_value()); },
+                    &ExactPtr(val, _) => unsafe { return Some((&*val).get_wrapped_value()); },
+                    &_Type(..) => { unreachable!(); },
                 },
                 None => { return None; },
             }
@@ -817,13 +862,13 @@ impl VarStore for VarMap {
     ///! Add a variable with a new value to the map.  Called by `make_var_of()`.
     fn store_value<A>(&mut self, value: A) -> Var<A>
     where A : VarWrapper + 'static {
-        Var::new(self.store_value_untyped(ExactVal::new(value), TypeId::of::<A>()))
+        Var::new(self.store_value_untyped(ExactVal::new(value)))
     }
 
     ///! Create a new variable with no value.
     fn make_var<A>(&mut self) -> Var<A>
     where A : VarWrapper {
-        let var = Exactly(Fresh, TypeId::of::<A>());
+        let var = Fresh(TypeId::of::<A>());
         let id = self.incr_id();
         self.eqs.push((id, var));
         Var::new(id)
@@ -879,11 +924,10 @@ impl VarMap {
             _ => false,
         }
     }
-    fn store_value_untyped(&mut self, val: ExactVal, typeid: TypeId) -> UntypedVar {
+    fn store_value_untyped(&mut self, val: ExactVal) -> UntypedVar {
         let id = self.incr_id();
         //println!("storing {:?} as {:?}", value, id);
-        let var = Exactly(val, typeid);
-        self.eqs.push((id, var));
+        self.eqs.push((id, val.as_var_ref()));
         id
     }
     fn iter(&self) -> VarMapIter {
@@ -947,9 +991,10 @@ impl Debug for State {
     fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
 
         fn debug_var_ref(me: &State, val: &VarRef, fmt: &mut Formatter) -> fmt::Result {
-            match *val {
-                EqualTo(x) => write!(fmt, "EqualTo({:?})", x),
-                Exactly(ref x, ty) => {
+            match val.split() {
+                Err(x) => write!(fmt, "EqualTo({:?})", x),
+                Ok(x) => {
+                    let ty = x.get_type();
                     let x = unsafe { me.var_opt(x) };
                     try!(write!(fmt, "Exactly("));
                     try!(match x {
@@ -990,16 +1035,15 @@ impl Debug for State {
                 }
                 try!(write!(fmt, "\t\t"));
                 loop {
-                    match eq {
-                        &EqualTo(x) => {
+                    match eq.split() {
+                        Err(x) => {
                             try!(write!(fmt, "{:?} => ", x));
                             eq = self.get_ref(x);
                         },
-                        &Exactly(ref x, _) => {
-                            match x {
-                                &Fresh => try!(writeln!(fmt, "Fresh")),
-                                &Value(ref y) => try!(writeln!(fmt, "{:?}", y)),
-                                &ValuePtr(y) => try!(writeln!(fmt, "{:?}", unsafe { &*y })),
+                        Ok(x) => {
+                            match unsafe { state.var_opt(x) } {
+                                None => try!(writeln!(fmt, "Fresh")),
+                                Some(y) => try!(writeln!(fmt, "{:?}", y)),
                             }
                             break;
                         }

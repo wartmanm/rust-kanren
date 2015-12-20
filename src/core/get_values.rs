@@ -4,8 +4,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::collections::hash_map::Entry::*;
 use std::rc::Rc;
 use core::{UntypedVar, State, FollowRef, VarWrapper, Unifier};
-use core::VarRef::*;
-use core::ExactVal::*;
+use core::ExactVarRef::*;
 use iter::{StateIter, single, TailIter};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -32,7 +31,7 @@ fn value_iter(state: Rc<State>, var: UntypedVar, mut iter: VarWrapperIter) -> Ta
         while let Some(x) = iter.next() {
             let mut child = State::with_parent(state.clone());
             let tid = x.get_type_id();
-            let newid = child.eqs.store_value_untyped(Value(x), tid);
+            let newid = child.eqs.store_value_untyped(Exactly(x, tid));
             child.untyped_unify(newid, var, tid, true);
             if child.ok() { return TailIterResult(Some(child), Some(value_iter(state, var, iter))); }
         }
@@ -93,9 +92,9 @@ pub fn assign_all_values(state: State) -> StateIter {
     let gathered = {
         let iter = ParentStateIter::new(&state)
             .flat_map(|state| state.eqs.iter())
-            .flat_map(|&(var, ref val)| match val {
-                &EqualTo(_) => None.into_iter(),
-                &Exactly(ref x, _) => Some((var, unsafe { state.var_opt(x) })).into_iter(),
+            .flat_map(|&(var, ref val)| match val.as_exact() {
+                None => None.into_iter(),
+                Some(x) => Some((var, unsafe { state.var_opt(x) })).into_iter(),
             });
         GatheredValues::new(&state, iter)
     };
@@ -147,8 +146,8 @@ fn assign_values_inner(state: State, mut counted: BTreeSet<CountedVar>, mut vars
         let mut vars = vars.clone();
         for &(key, ref some_val) in state.eqs.iter() {
             let var_entry = vars.entry(key);
-            match *some_val {
-                Exactly(ref exactval, _) => {
+            match some_val.as_exact() {
+                Some(exactval) => {
                     let val_opt = unsafe { state.var_opt(exactval) };
                     if let Some(val) = val_opt {
                         match var_entry {
@@ -173,7 +172,7 @@ fn assign_values_inner(state: State, mut counted: BTreeSet<CountedVar>, mut vars
                         panic!("impossible!");
                     }
                 },
-                EqualTo(_) => {
+                None => {
                     if let Occupied(x) = var_entry {
                         counted.remove(&CountedVar(key, *x.get()));
                         x.remove();
