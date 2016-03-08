@@ -101,7 +101,7 @@ macro_rules! tuple_wrapper {
                 state.store_value(($($param,)*))
             }
         }
-        impl<$($param,)*> VarWrapper for ($(Var<$param>,)*) where $($param: ToVar,)* {
+        impl<$($param,)*> VarWrapper for ($(Var<$param>,)*) where $($param: VarWrapper,)* {
             #[allow(non_snake_case)]
             fn unify_with(&self, other: &VarWrapper, state: &mut StateProxy) -> UnifyResult {
                 let &($($param,)*) = other.get_wrapped_value::<($(Var<$param>),*)>();
@@ -132,7 +132,7 @@ tuple_wrapper!((A a, B b, C c): [UntypedVar; 3]);
 tuple_wrapper!((A a, B b, C c, D d): [UntypedVar; 4]);
 tuple_wrapper!((A a, B b, C c, D d, E e): [UntypedVar; 5]);
 
-impl<A> VarWrapper for Option<Var<A>> where A: ToVar {
+impl<A> VarWrapper for Option<Var<A>> where A: VarWrapper {
     fn unify_with(&self, other: &VarWrapper, state: &mut StateProxy) -> UnifyResult {
         let other = other.get_wrapped_value::<Option<Var<A>>>();
         (match (self, other) {
@@ -163,7 +163,7 @@ impl<A> ToVar for Option<A> where A: ToVar {
     }
 }
 
-impl<A, B> VarWrapper for Result<Var<A>, Var<B>> where A: ToVar, B: ToVar {
+impl<A, B> VarWrapper for Result<Var<A>, Var<B>> where A: VarWrapper, B: VarWrapper {
     fn unify_with(&self, other: &VarWrapper, state: &mut StateProxy) -> UnifyResult {
         let other = other.get_wrapped_value::<Result<Var<A>, Var<B>>>();
         (match (self, other) {
@@ -188,12 +188,9 @@ impl<A, B> VarWrapper for Result<Var<A>, Var<B>> where A: ToVar, B: ToVar {
     }
 }
 
-impl<A, B> ToVar for Result<Var<A>, Var<B>> where A: ToVar, B: ToVar {
-    //type VarType = Result<Var<<A as ToVar>::VarType>, Var<<B as ToVar>::VarType>>;
-    // FIXME This is the wrong type, what is going on here?  The one above, respecting A and B's
-    // vartypes, is correct, but it doesn't compile.
-    type VarType = Result<Var<A>, Var<B>>;
-    fn into_var<U: VarStore+Unifier>(self, state: &mut U) -> Var<<Self as ToVar>::VarType> {
+impl<A, B> ToVar for Result<A, B> where A: ToVar, B: ToVar {
+    type VarType = Result<Var<A::VarType>, Var<B::VarType>>;
+    fn into_var<U: VarStore+Unifier>(self, state: &mut U) -> Var<Self::VarType> {
         let var = match self {
             Ok(x) => Ok(x.into_var(state)),
             Err(x) => Err(x.into_var(state)),
@@ -212,21 +209,21 @@ pub fn __<A>() -> IgnoreVar<A> where A: ToVar { IgnoreVar(PhantomData) }
 impl<A> Clone for IgnoreVar<A> where A: ToVar { fn clone(&self) -> IgnoreVar<A> { *self } }
 impl<A> Copy for IgnoreVar<A> where A: ToVar { }
 impl<A> PartialEq for IgnoreVar<A> where A: ToVar { fn eq(&self, _: &IgnoreVar<A>) -> bool { false } }
-impl<A> ToVar for IgnoreVar<A> where A: ToVar {
+impl<A> ToVar for IgnoreVar<A> where A: ToVar + VarWrapper {
     type VarType = A;
     fn into_var<U: VarStore>(self, state: &mut U) -> Var<A> {
         state.make_var()
     }
 }
 
-impl<A> ToVar for &'static [A] where A: ToVar + Clone {
+impl<A> ToVar for &'static [A] where A: ToVar + Clone + VarWrapper {
     type VarType=List<<A as ToVar>::VarType>;
     fn into_var<U: VarStore+Unifier>(self, state: &mut U) -> Var<List<<A as ToVar>::VarType>> {
         List::new_from_iter(state, self.iter().map(|x| x.clone()))
     }
 }
 
-impl<A> ToVar for Vec<A> where A: ToVar {
+impl<A> ToVar for Vec<A> where A: ToVar + VarWrapper {
     type VarType=List<<A as ToVar>::VarType>;
     fn into_var<U: VarStore+Unifier>(self, state: &mut U) -> Var<List<<A as ToVar>::VarType>> {
         List::new_from_iter(state, self)
@@ -235,7 +232,7 @@ impl<A> ToVar for Vec<A> where A: ToVar {
 
 macro_rules! list_builder {
     ($count:expr) => {
-        impl<A> ToVar for [A; $count] where A: ToVar + Clone {
+        impl<A> ToVar for [A; $count] where A: Clone + ToVar {
             type VarType = List<<A as ToVar>::VarType>;
             fn into_var<U: VarStore+Unifier>(self, state: &mut U) -> Var<List<<A as ToVar>::VarType>> {
                 List::new_from_iter(state, self.into_iter().map(|x| x.clone()))

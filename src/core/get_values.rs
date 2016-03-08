@@ -33,7 +33,7 @@ fn value_iter(state: Rc<State>, var: UntypedVar, mut iter: VarWrapperIter) -> Ta
             let mut child = State::with_parent(state.clone());
             let tid = x.get_type_id();
             let newid = child.eqs.store_value_untyped(Value(x), tid);
-            child.untyped_unify(newid, var, tid);
+            child.untyped_unify(newid, var, tid, true);
             if child.ok() { return TailIterResult(Some(child), Some(value_iter(state, var, iter))); }
         }
         return TailIterResult(None, None);

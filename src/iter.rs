@@ -1,4 +1,4 @@
-use core::{ToVar, State, Var, Unifier, VarRetrieve};
+use core::{ToVar, State, Var, Unifier, VarRetrieve, VarWrapper};
 use std::rc::Rc;
 use std::marker::PhantomData;
 use std::any::*;
@@ -267,14 +267,14 @@ impl From<State> for StateIter {
 
 ///! An iterator which retrieves the value of a variable from each state in a `StateIter`.
 pub struct VarIter<'a, A>
-where A : ToVar {
+where A : ToVar + VarWrapper {
     iter: &'a mut TailIterResult,
     var: Var<A>,
 }
 
 
 impl<'a, A> Iterator for VarIter<'a, A>
-where A : ToVar + Clone {
+where A : ToVar + Clone + VarWrapper {
     type Item = Option<A>;
     fn next(&mut self) -> Option<Option<A>> {
         self.iter.next().map(|x| x.get_value(self.var).map(|val| val.clone()))
@@ -282,7 +282,7 @@ where A : ToVar + Clone {
 }
 
 impl<'a, A> VarIter<'a, A>
-where A : ToVar {
+where A : ToVar + VarWrapper {
     pub fn new(iter: &'a mut StateIter, var: Var<A>) -> VarIter<'a, A> {
         VarIter { iter: iter, var: var }
     }
@@ -290,11 +290,11 @@ where A : ToVar {
 
 pub trait StateIterExt {
     ///! Helper method to create `VarIter`s.
-    fn var_iter<A>(&mut self, var: Var<A>) -> VarIter<A> where A: ToVar;
+    fn var_iter<A>(&mut self, var: Var<A>) -> VarIter<A> where A: ToVar + VarWrapper;
 }
 
 impl StateIterExt for StateIter {
-    fn var_iter<A>(&mut self, var: Var<A>) -> VarIter<A> where A: ToVar {
+    fn var_iter<A>(&mut self, var: Var<A>) -> VarIter<A> where A: ToVar + VarWrapper {
         VarIter::new(self, var)
     }
 }
@@ -331,7 +331,7 @@ where F: Fn(State) -> StateIter + 'static {
 impl<F> Unifier for FindAll<F>
 where F: Fn(State) -> StateIter + 'static {
     fn unify_vars<A>(&mut self, a: Var<A>, b: Var<A>) -> &mut FindAll<F>
-    where A : ToVar { Rc::get_mut(&mut self.state).unwrap().unify_vars(a, b); self }
+    where A : VarWrapper { Rc::get_mut(&mut self.state).unwrap().unify_vars(a, b); self }
     fn fail(&mut self) -> &mut FindAll<F> { Rc::get_mut(&mut self.state).unwrap().fail(); self }
     fn ok(&self) -> bool { self.state.ok() }
 }
@@ -354,7 +354,7 @@ impl<'a> Iterator for FindAllIter<'a> {
 pub fn findall_list<F, L, T, V>(mut state: State, list: L, var: V, state_fn: F) -> State
 where F: Fn(State) -> StateIter + 'static,
       L: ToVar<VarType=::list::List<Option<Var<<T as ToVar>::VarType>>>>,
-      T: ToVar + Clone + PartialEq,
+      T: ToVar + Clone + PartialEq + VarWrapper,
       V: ToVar<VarType=T> {
     use list::{Pair, Nil};
     use core::VarStore;

@@ -39,7 +39,7 @@ trait ReifyPrint {
     fn write(&self, _: &mut Reifier, _: &mut Write);
 }
 
-fn reify_print<A: ToVar + ReifyPrint>(r: &mut Reifier, v: A) -> String {
+fn reify_print<A: ReifyPrint>(r: &mut Reifier, v: A) -> String {
     let mut s = String::new();
     write!(s, "{:?}", reify_fmt(r, v)).unwrap();
     s
@@ -50,7 +50,7 @@ fn reify_fmt<'a, 'b, A: ReifyPrint>(r: &'a mut Reifier<'b>, v: A) -> ReifyPrinte
     ReifyPrinter { r: cell, val: v }
 }
 
-impl<A> ReifyPrint for Var<A> where A: ToVar + ReifyPrint {
+impl<A> ReifyPrint for Var<A> where A: ReifyPrint + VarWrapper {
     fn write(&self, r: &mut Reifier, w: &mut Write) {
         let reified = r.reify(*self);
         match reified {
@@ -72,7 +72,7 @@ impl<'a, 'b, A: ReifyPrint> Debug for ReifyPrinter<'a, 'b, A> {
     }
 }
 
-impl<T: ReifyPrint + ToVar> ReifyPrint for List<T> {
+impl<T: ReifyPrint + VarWrapper> ReifyPrint for List<T> {
     fn write(&self, r: &mut Reifier, w: &mut Write) {
         let mut list = *self;
         let mut started = false;
@@ -117,7 +117,7 @@ impl ReifyPrint for String {
     }
 }
 
-impl<A: ReifyPrint + ToVar, B: ReifyPrint + ToVar> ReifyPrint for (Var<A>, Var<B>) {
+impl<A: ReifyPrint + VarWrapper, B: ReifyPrint + VarWrapper> ReifyPrint for (Var<A>, Var<B>) {
     fn write(&self, r: &mut Reifier, w: &mut Write) {
         write!(w, "(").unwrap();
         self.0.write(r, w);

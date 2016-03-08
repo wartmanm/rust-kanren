@@ -1,6 +1,6 @@
 use std::any::TypeId;
 use std::fmt::{self, Debug, Formatter};
-use core::{ConstraintResult, StateProxy, UntypedVar, Constraint, State, Var, ToVar, FollowRef, Unifier, VarMap};
+use core::{ConstraintResult, StateProxy, UntypedVar, Constraint, State, Var, ToVar, FollowRef, Unifier, VarMap, VarWrapper};
 use core::ConstraintResult::*;
 use core::VarRef::*;
 
@@ -27,7 +27,7 @@ impl Disequal {
     pub fn new_empty() -> Disequal {
         Disequal { pairs: Vec::new() }
     }
-    pub fn push<A>(&mut self, state: &State, a: Var<A>, b: Var<A>) where A: ToVar {
+    pub fn push<A>(&mut self, state: &State, a: Var<A>, b: Var<A>) where A: ToVar + VarWrapper {
         let a = state.follow_id(a.var);
         let b = state.follow_id(b.var);
         self.pairs.push((a, b, TypeId::of::<A>()));
@@ -70,7 +70,7 @@ impl Disequal {
     fn perform_test(&self, proxy: &mut StateProxy) -> ConstraintResult<Disequal> {
         //println!("updating {:?}", self);
         for &(a, b, ty) in self.pairs.iter() {
-            proxy.untyped_unify(a, b, ty);
+            proxy.untyped_unify(a, b, ty, true);
             if !proxy.ok() {
                 //println!("failed unification, disequality constraint satisfied");
                 return Irrelevant;

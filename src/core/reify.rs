@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry::*;
-use core::{ToVar, State, UntypedVar, Var, FollowRef};
+use core::{State, UntypedVar, Var, FollowRef, VarWrapper};
 use core::ExactVal::*;
 use std::fmt::{self, Debug, Display};
-//use core::{ToVar};
+
 ///! Reifies variables, providing a consistent, unique identifier for unset variables.  For
 ///! compatibility, it starts counting from _0 rather than using the variable's underlying usize.
 pub struct Reifier<'a> {
@@ -40,7 +40,7 @@ impl<'a> Reifier<'a> {
         Reifier { eqs: HashMap::new(), id: 0, parent: parent }
     }
 
-    pub fn reify<A: ToVar>(&mut self, var: Var<A>) -> Reified<'a, A> {
+    pub fn reify<A: VarWrapper>(&mut self, var: Var<A>) -> Reified<'a, A> {
         let (walked, value, _) = self.parent.follow_ref(var.var);
         match *value {
             Value(ref x) => Reified::Value(x.get_wrapped_value()),

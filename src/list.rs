@@ -8,7 +8,7 @@ use list::List::Pair as VarPair;
 
 ///! A singly-linked List.
 pub enum List<A>
-where A: ToVar {
+where A: VarWrapper {
     Pair(Var<A>, Var<List<A>>),
     Nil
 }
@@ -16,17 +16,17 @@ where A: ToVar {
 ///! A struct that can be converted into a (Head, Tail) pair in a singly linked list.
 #[derive(Debug)]
 pub struct Pair<A, B, C>(pub B, pub C)
-where A: ToVar, B: ToVar<VarType=A>, C: ToVar<VarType=List<A>>;
+where A: VarWrapper, B: ToVar<VarType=A>, C: ToVar<VarType=List<A>>;
 
 impl<A, B, C> Clone for Pair<A, B, C>
-where A: ToVar, B: ToVar<VarType=A> + Clone, C: ToVar<VarType=List<A>> + Clone {
+where A: VarWrapper, B: ToVar<VarType=A> + Clone, C: ToVar<VarType=List<A>> + Clone {
     fn clone(&self) -> Pair<A, B, C> { Pair(self.0.clone(), self.1.clone()) }
 }
 impl<A, B, C> Copy for Pair<A, B, C>
-where A: ToVar, B: ToVar<VarType=A> + Copy, C: ToVar<VarType=List<A>> + Copy { }
+where A: VarWrapper, B: ToVar<VarType=A> + Copy, C: ToVar<VarType=List<A>> + Copy { }
 
 impl<A, B, C> ToVar for Pair<A, B, C>
-where A: ToVar, B: ToVar<VarType=A>, C: ToVar<VarType=List<A>> {
+where A: VarWrapper, B: ToVar<VarType=A>, C: ToVar<VarType=List<A>> {
     type VarType = List<A>;
     fn into_var<U: VarStore+Unifier>(self, state: &mut U) -> Var<List<A>> {
         let a = state.make_var_of(self.0);
@@ -35,11 +35,11 @@ where A: ToVar, B: ToVar<VarType=A>, C: ToVar<VarType=List<A>> {
     }
 }
 
-impl<A> Clone for List<A> where A: ToVar { fn clone(&self) -> List<A> { *self } }
-impl<A> Copy for List<A> where A: ToVar { }
+impl<A> Clone for List<A> where A: VarWrapper { fn clone(&self) -> List<A> { *self } }
+impl<A> Copy for List<A> where A: VarWrapper { }
 
 impl<A> VarWrapper for List<A>
-where A : ToVar {
+where A : VarWrapper {
     fn unify_with(&self, other: &VarWrapper, ctxt: &mut StateProxy) -> UnifyResult {
         let mut a = *self;
         let mut b = *other.get_wrapped_value();
@@ -70,6 +70,7 @@ where A : ToVar {
             &Nil => None,
         }
     }
+    fn is_recursive() -> bool where Self: Sized { true }
     fn occurs_check(&self, state: &StateProxy, other: UntypedVar) -> bool {
         let mut list = self;
         loop {
@@ -109,10 +110,10 @@ impl Iterator for PairIter {
 }
 
 impl<A> List<A>
-where A : ToVar {
+where A : VarWrapper {
     ///! Create a `List` from an `IntoIterator`.
-    pub fn new_from_iter<B, U>(state: &mut U, intoiter: B) -> Var<List<<A as ToVar>::VarType>>
-    where B : IntoIterator<Item=A>, U: VarStore + Unifier {
+    pub fn new_from_iter<B, C, U>(state: &mut U, intoiter: B) -> Var<List<A>>
+    where B : IntoIterator<Item=C>, C: ToVar<VarType=A>, U: VarStore + Unifier {
 
         let iter = intoiter.into_iter();
         let liststart = state.make_var();
@@ -152,17 +153,17 @@ where A : ToVar {
     //}
 
     ///! Create a new list from an iterator.
-    pub fn build<I>(iter: I) -> ListBuilder<A, <I as IntoIterator>::IntoIter>
-    where I: IntoIterator<Item=A>, <I as IntoIterator>::IntoIter: 'static {
+    pub fn build<B, I>(iter: I) -> ListBuilder<B, <I as IntoIterator>::IntoIter>
+    where B: ToVar<VarType=A>, I: IntoIterator<Item=B>, <I as IntoIterator>::IntoIter: 'static {
         ListBuilder::new(iter)
     }
 }
 
-trait ListExt<A> where A: ToVar {
+trait ListExt<A> where A: VarWrapper {
     fn check_elem<B>(&self, state: &mut State, elem: B) -> bool where B: ToVar<VarType=A>;
 }
 
-impl<A> ListExt<A> for List<A> where A: ToVar {
+impl<A> ListExt<A> for List<A> where A: VarWrapper {
     fn check_elem<B>(&self, state: &mut State, elem: B) -> bool where B: ToVar<VarType=A> {
         let elem = state.make_var_of(elem);
         let mut pair = Some(*self);
@@ -177,7 +178,7 @@ impl<A> ListExt<A> for List<A> where A: ToVar {
     }
 }
 
-impl<A> ListExt<A> for Var<List<A>> where A: ToVar {
+impl<A> ListExt<A> for Var<List<A>> where A: VarWrapper {
     fn check_elem<B>(&self, state: &mut State, elem: B) -> bool where B: ToVar<VarType=A> {
         let list = state.get_value(*self).map(|&x| x).unwrap_or(Nil);
         list.check_elem(state, elem)
@@ -185,7 +186,7 @@ impl<A> ListExt<A> for Var<List<A>> where A: ToVar {
 }
 
 impl<A> Debug for List<A>
-where A : ToVar {
+where A : VarWrapper {
     fn fmt(&self, fmt: &mut Formatter) -> ::std::fmt::Result {
         match self {
             &VarPair(ref head, ref tail) => write!(fmt, "VarPair({:?}, {:?})", head, tail),
@@ -220,13 +221,13 @@ impl<A, B> ToVar for ListBuilder<A, B> where A: ToVar, B: Iterator<Item=A> + Any
 
 ///! Iterator over the `(Head, Tail)` variable pairs in a `List`.
 pub struct VarIterator<'a, A, B>
-where A : ToVar, B : VarRetrieve + 'a {
+where A : VarWrapper, B : VarRetrieve + 'a {
     list: List<A>,
     state: &'a B,
 }
 
 impl<'a, 'b, A, B> Iterator for VarIterator<'a, A, B>
-where A : ToVar, B : VarRetrieve + 'a {
+where A : VarWrapper, B : VarRetrieve + 'a {
     type Item = (Var<A>, Var<List<A>>);
     fn next(&mut self) -> Option<(Var<A>, Var<List<A>>)> {
         match self.list {
@@ -242,13 +243,13 @@ where A : ToVar, B : VarRetrieve + 'a {
 
 ///! Iterator over values in a `List`.
 pub struct ListIterator<'a, A, B>
-where A : ToVar, B : VarRetrieve + 'a {
+where A : VarWrapper, B : VarRetrieve + 'a {
     list: List<A>,
     state: &'a B,
 }
 
 impl<'a, A, B> Iterator for ListIterator<'a, A, B>
-where A : ToVar, B: VarRetrieve {
+where A : VarWrapper, B: VarRetrieve {
     type Item = Option<&'a A>;
     fn next(&mut self) -> Option<Option<&'a A>> {
         let (headid, tailid) = match self.list {
@@ -261,7 +262,7 @@ where A : ToVar, B: VarRetrieve {
     }
 }
 
-impl<A> ToVar for List<A> where A : ToVar {
+impl<A> ToVar for List<A> where A : VarWrapper {
     type VarType = List<A>;
     fn into_var<U: VarStore>(self, state: &mut U) -> Var<List<A>> {
         state.store_value(self)

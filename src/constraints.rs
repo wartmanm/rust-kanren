@@ -1,5 +1,5 @@
 use std::ops::{Add, Sub};
-use core::{ToVar, ToConstraint, Constraint, Var, StateProxy, State, ConstraintResult, VarStore, Unifier, VarRetrieve, VarMap, UntypedVar};
+use core::{ToVar, ToConstraint, Constraint, Var, StateProxy, State, ConstraintResult, VarStore, Unifier, VarRetrieve, VarMap, UntypedVar, VarWrapper};
 use core::ConstraintResult::*;
 use finitedomain::Fd;
 use finitedomain::Fd::*;
@@ -9,13 +9,13 @@ use core::disequal::Disequal as VarDisequal;
 
 ///! The Disequal constraint enforces that its arguments will never have equal values.
 pub struct Disequal<A, B, C>
-where A: ToVar<VarType=C>, B: ToVar<VarType=C>, C: ToVar {
+where A: ToVar<VarType=C>, B: ToVar<VarType=C>, C: ToVar + VarWrapper {
     a: A,
     b: B,
 }
 
 impl<A, B, C> Disequal<A, B, C>
-where A: ToVar<VarType=C>, B: ToVar<VarType=C>, C: ToVar {
+where A: ToVar<VarType=C>, B: ToVar<VarType=C>, C: ToVar + VarWrapper {
     pub fn new(a: A, b: B) -> Disequal<A, B, C> {
         Disequal { a: a, b: b }
     }
@@ -23,7 +23,7 @@ where A: ToVar<VarType=C>, B: ToVar<VarType=C>, C: ToVar {
 
 ///! The Disequal constraint enforces that its arguments will never have equal values.
 impl<A, B, C> ToConstraint for Disequal<A, B, C>
-where A: ToVar<VarType=C>, B: ToVar<VarType=C>, C: ToVar {
+where A: ToVar<VarType=C>, B: ToVar<VarType=C>, C: ToVar + VarWrapper {
     type ConstraintType = VarDisequal;
     fn into_constraint(self, state: &mut State) -> VarDisequal {
         let mut disequal = VarDisequal::new_empty();
@@ -37,7 +37,7 @@ where A: ToVar<VarType=C>, B: ToVar<VarType=C>, C: ToVar {
 ///! Constrains three number variables so that A + B = C.
 #[derive(Debug, Clone)]
 pub struct SumConstraint<A, B, C, D>
-where A: ToVar<VarType=A> + Add<Output=A> + PartialEq, B: ToVar<VarType=A>, C: ToVar<VarType=A>, D: ToVar<VarType=A> {
+where A: ToVar<VarType=A> + Add<Output=A> + PartialEq + VarWrapper, B: ToVar<VarType=A>, C: ToVar<VarType=A>, D: ToVar<VarType=A> {
     l: B,
     r: C,
     result: D,
@@ -45,7 +45,7 @@ where A: ToVar<VarType=A> + Add<Output=A> + PartialEq, B: ToVar<VarType=A>, C: T
 pub type VarSumConstraint<A> = SumConstraint<A, Var<A>, Var<A>, Var<A>>;
 
 impl<A, B, C, D> ToConstraint for SumConstraint<A, B, C, D>
-where A: ToVar<VarType=A> + Add<Output=A> + Sub<Output=A> + PartialEq + Clone, B: ToVar<VarType=A>, C: ToVar<VarType=A>, D: ToVar<VarType=A> {
+where A: ToVar<VarType=A> + Add<Output=A> + Sub<Output=A> + PartialEq + Clone + VarWrapper, B: ToVar<VarType=A>, C: ToVar<VarType=A>, D: ToVar<VarType=A> {
     type ConstraintType = SumConstraint<A, Var<A>, Var<A>, Var<A>>;
     fn into_constraint(self, state: &mut State) -> VarSumConstraint<A> {
         let l = state.make_var_of(self.l);
@@ -56,14 +56,14 @@ where A: ToVar<VarType=A> + Add<Output=A> + Sub<Output=A> + PartialEq + Clone, B
 }
 
 impl<A, B, C, D> SumConstraint<A, B, C, D>
-where A: ToVar<VarType=A> + Add<Output=A> + Sub<Output=A> + PartialEq,
+where A: ToVar<VarType=A> + Add<Output=A> + Sub<Output=A> + PartialEq + VarWrapper,
 B: ToVar<VarType=A>, C: ToVar<VarType=A>, D: ToVar<VarType=A> {
     pub fn new(l: B, r: C, result: D) -> SumConstraint<A, B, C, D> {
         SumConstraint { l: l, r: r, result: result }
     }
 }
 
-impl<A> Constraint for VarSumConstraint<A> where A: ToVar<VarType=A> + Add<Output=A> + Sub<Output=A> + PartialEq + Clone {
+impl<A> Constraint for VarSumConstraint<A> where A: ToVar<VarType=A> + Add<Output=A> + Sub<Output=A> + PartialEq + Clone + VarWrapper {
     fn update(&self, state: &mut StateProxy) -> ConstraintResult<VarSumConstraint<A>> {
         let l = state.get_value(self.l).map(|x| x.clone());
         let r = state.get_value(self.r).map(|x| x.clone());
@@ -449,27 +449,27 @@ impl Constraint for VarFdUsizeConstraint {
 ///! Constrains two variables, an element and a container, so that the element cannot be unified
 ///! with anything in the container.
 pub struct AbsentConstraint<A, B, C>
-where A: ToVar, B: ToVar<VarType=A>, C: ToVar {
+where A: ToVar + VarWrapper, B: ToVar<VarType=A>, C: ToVar {
     elem: B,
     list: C,
 }
 
 ///! Implementation of `AbsentConstraint`.  Don't use this directly, use `AbsentConstraint`.
 #[derive(Debug)]
-pub struct VarAbsentConstraint<A> where A: ToVar {
+pub struct VarAbsentConstraint<A> where A: ToVar + VarWrapper {
     elem: Var<A>,
     list: Vec<UntypedVar>,
     fresh: Vec<UntypedVar>,
 }
 
-impl<A> Clone for VarAbsentConstraint<A> where A: ToVar {
+impl<A> Clone for VarAbsentConstraint<A> where A: ToVar + VarWrapper {
     fn clone(&self) -> VarAbsentConstraint<A> {
         VarAbsentConstraint { elem: self.elem, list: self.list.clone(), fresh: self.fresh.clone() }
     }
 }
 
 impl<A, B, C> ToConstraint for AbsentConstraint<A, B, C>
-where A: ToVar, B: ToVar<VarType=A>, C: ToVar {
+where A: ToVar + VarWrapper, B: ToVar<VarType=A>, C: ToVar {
     type ConstraintType = VarAbsentConstraint<A>;
     fn into_constraint(self, state: &mut State) -> VarAbsentConstraint<A> {
         let elem = state.make_var_of(self.elem);
@@ -488,7 +488,7 @@ where A: ToVar, B: ToVar<VarType=A>, C: ToVar {
 }
 
 impl<A, B, C> AbsentConstraint<A, B, C>
-where A: ToVar, B: ToVar<VarType=A>, C: ToVar {
+where A: ToVar + VarWrapper, B: ToVar<VarType=A>, C: ToVar {
     pub fn new(elem: B, list: C) -> AbsentConstraint<A, B, C> {
         AbsentConstraint { elem: elem, list: list }
     }
@@ -533,7 +533,7 @@ fn check_unify(state: &mut StateProxy, list: &mut Cow<Vec<UntypedVar>>, elem: Un
     return true;
 }
 
-impl<A> Constraint for VarAbsentConstraint<A> where A: ToVar {
+impl<A> Constraint for VarAbsentConstraint<A> where A: ToVar + VarWrapper {
     fn update(&self, state: &mut StateProxy) -> ConstraintResult<VarAbsentConstraint<A>> {
         //let mut me = Cow::Borrowed(self);
         //push_tail(&mut me, state);

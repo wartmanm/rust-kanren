@@ -3,7 +3,7 @@
 #[macro_use]
 extern crate kanren;
 
-use kanren::core::{State, Var, ToVar, VarStore, Unifier};
+use kanren::core::{State, Var, ToVar, VarStore, Unifier, VarWrapper};
 use kanren::core::vars::__;
 use kanren::core::reify::{Reifier, Reified};
 use kanren::list::List;
@@ -248,7 +248,7 @@ fn multiply_any(count: usize) {
     }
 }
 
-fn reify_list<A>(state: &State, reifier: &mut Reifier, list: Var<List<A>>) -> String where A : ToVar {
+fn reify_list<A>(state: &State, reifier: &mut Reifier, list: Var<List<A>>) -> String where A : VarWrapper {
     let list = match reifier.reify(list) {
         Reified::Value(x) => *x,
         x @ Reified::Unset(..) => { return format!("{:?}", x); }

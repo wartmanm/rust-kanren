@@ -29,9 +29,9 @@ pub struct UntypedVar(usize);
 ///! Typed wrapper for a usize, used as a unique variable identifier.  Currently they aren't tied
 ///! to a particular state, so the typing, while helpful, isn't sufficient to guarantee safety
 ///! without additional runtime checks.
-pub struct Var<A> { var: UntypedVar, var_type: PhantomData<A> }
-impl<A> Clone for Var<A> { fn clone(&self) -> Var<A> { *self } }
-impl<A> Copy for Var<A> { }
+pub struct Var<A: VarWrapper> { var: UntypedVar, var_type: PhantomData<A> }
+impl<A> Clone for Var<A> where A: VarWrapper { fn clone(&self) -> Var<A> { *self } }
+impl<A> Copy for Var<A> where A: VarWrapper { }
 
 ///! State is the heart of rust_kanren.  It tracks all variable substitutions added by calling
 ///! `unify()`, hands out Vars through `make_var()` and `make_var_of()`, and tracks whether any
@@ -62,7 +62,7 @@ pub enum ConstraintResult<A> {
 
 ///! Trait for anything that can be used as a variable or turned into one.
 pub trait ToVar : Debug + Any {
-    type VarType : ToVar;
+    type VarType : VarWrapper;
     fn into_var<U: VarStore+Unifier>(self, state: &mut U) -> Var<Self::VarType>;
 }
 
@@ -138,9 +138,9 @@ impl<A> Debug for ConstraintWrapper<A> where A : Constraint + Clone + 'static {
 ///! Store a value in a state.
 pub trait VarStore {
     ///! Add a variable with a new value to the map.  Called by `make_var_of()`.
-    fn store_value<A>(&mut self, value: A) -> Var<A> where A : VarWrapper + ToVar + 'static;
+    fn store_value<A>(&mut self, value: A) -> Var<A> where A : VarWrapper + 'static;
     ///! Create a new variable with no value.
-    fn make_var<A>(&mut self) -> Var<A> where A : ToVar;
+    fn make_var<A>(&mut self) -> Var<A> where A : VarWrapper;
     ///! Create a new variable with the provided value.
     fn make_var_of<A>(&mut self, value: A) -> Var<<A as ToVar>::VarType>
     where A : ToVar, Self: Sized + Unifier {
@@ -151,13 +151,13 @@ pub trait VarStore {
 ///! Retrieve a value from a state.
 pub trait VarRetrieve {
     ///! Retrive a reference to the stored value of a variable, if any.
-    fn get_value<A>(&self, a: Var<A>) -> Option<&A> where A : ToVar;
+    fn get_value<A>(&self, a: Var<A>) -> Option<&A> where A : VarWrapper;
     fn get_untyped(&self, var: UntypedVar) -> Option<&VarWrapper>;
 }
 
 ///! Unify variables together, and get or change the current success state.
 pub trait Unifier {
-    fn unify_vars<A>(&mut self, a: Var<A>, b: Var<A>) -> &mut Self where A : ToVar;
+    fn unify_vars<A>(&mut self, a: Var<A>, b: Var<A>) -> &mut Self where A : VarWrapper;
     ///! Mark the state as invalid.
     fn fail(&mut self) -> &mut Self;
     ///! Retrive whether the state is valid.
@@ -171,7 +171,7 @@ pub trait Unifier {
     }
     ///! Helper method for unification.  Converts values to variables and calls unify_vars().
     fn unify<A, B, C>(&mut self, a: B, b: C) -> &mut Self
-    where A : ToVar, B : ToVar<VarType=A>, C : ToVar<VarType=A>, Self: VarStore + Sized {
+    where A : VarWrapper, B : ToVar<VarType=A>, C : ToVar<VarType=A>, Self: VarStore + Sized {
         let avar: Var<A> = self.make_var_of(a);
         let bvar: Var<A> = self.make_var_of(b);
         self.unify_vars(avar, bvar);
@@ -221,6 +221,7 @@ pub trait VarWrapper : Debug + 'static + Any + VarWrapperClone {
             None => false
         }
     }
+    fn is_recursive() -> bool where Self: Sized { false }
 }
 
 trait FollowRef {
@@ -250,7 +251,7 @@ trait FollowRef {
         self.follow_ref(id).1
     }
 
-    fn get_exact_val_opt<A>(&self, id: UntypedVar) -> Option<&A> where A: ToVar {
+    fn get_exact_val_opt<A>(&self, id: UntypedVar) -> Option<&A> where A: VarWrapper {
         self.get_exact_val(id).opt().map(|x| x.get_wrapped_value())
     }
 }
@@ -312,7 +313,7 @@ impl VarWrapper {
     //! Reimplementation of Any::downcast_ref(), because the original doesn't seem to be
     //! available.  I'm not entirely sure why.
     pub fn get_wrapped_value<T>(&self) -> &T
-    where T : ToVar {
+    where T : VarWrapper {
         assert!(TypeId::of::<T>() == self.get_type_id());
         let x: TraitObject = unsafe { ::std::mem::transmute(self) };
         unsafe { ::std::mem::transmute(x.data) }
@@ -320,7 +321,7 @@ impl VarWrapper {
 }
 
 impl<A> Var<A>
-where A : ToVar {
+where A : VarWrapper {
     fn new(var: UntypedVar) -> Var<A> {
         Var { var: var, var_type: PhantomData }
     }
@@ -335,7 +336,7 @@ where A : ToVar {
     }
 }
 
-impl<A> ToVar for Var<A> where A : ToVar {
+impl<A> ToVar for Var<A> where A : VarWrapper {
     type VarType = A;
     fn into_var<U: VarStore>(self, _: &mut U) -> Var<A> {
         self
@@ -361,7 +362,7 @@ impl ExactVal {
 }
 
 impl VarRetrieve for State {
-    fn get_value<A: ToVar>(&self, var: Var<A>) -> Option<&A> {
+    fn get_value<A: VarWrapper>(&self, var: Var<A>) -> Option<&A> {
         self.get_exact_val_opt(var.var)
     }
     fn get_untyped(&self, var: UntypedVar) -> Option<&VarWrapper> {
@@ -371,8 +372,8 @@ impl VarRetrieve for State {
 
 impl VarStore for State {
     fn store_value<A>(&mut self, value: A) -> Var<A>
-    where A : VarWrapper + ToVar + 'static { self.eqs.store_value(value) }
-    fn make_var<A>(&mut self) -> Var<A> where A : ToVar { self.eqs.make_var() }
+    where A : VarWrapper + 'static { self.eqs.store_value(value) }
+    fn make_var<A>(&mut self) -> Var<A> where A : VarWrapper { self.eqs.make_var() }
 }
 
 impl FollowRef for State {
@@ -394,8 +395,8 @@ impl FollowRef for State {
 
 impl Unifier for State {
     fn unify_vars<A>(&mut self, a: Var<A>, b: Var<A>) -> &mut State
-    where A : ToVar {
-        self.untyped_unify(a.var, b.var, TypeId::of::<A>());
+    where A : VarWrapper {
+        self.untyped_unify(a.var, b.var, TypeId::of::<A>(), A::is_recursive());
         self
     }
 
@@ -452,10 +453,10 @@ impl State {
     ///! Unify two variables.  Inserts an EqualTo if one or both are unset, or calls _equals_ if
     ///! both are set.  If the value is a container, this will recurse and call unify() on the
     ///! contained types; otherwise it simply compares them.
-    fn untyped_unify(&mut self, a: UntypedVar, b: UntypedVar, typeid: TypeId) -> bool {
+    fn untyped_unify(&mut self, a: UntypedVar, b: UntypedVar, typeid: TypeId, use_occurs_check: bool) -> bool {
         {
             let mut proxy = StateProxy::new(self);
-            proxy.untyped_unify(a, b, typeid);
+            proxy.untyped_unify(a, b, typeid, use_occurs_check);
         }
         let relevant = self.constraints.get_relevant_constraints(&self.proxy_eqs, Vec::new());
         self.merge_proxy();
@@ -548,11 +549,11 @@ impl State {
     }
 
     ///! Test whether two vars can be unified, cannot be unified, or are already equal.
-    pub fn are_vars_unified<A>(&mut self, a: Var<A>, b: Var<A>) -> Unifiability where A: ToVar {
+    pub fn are_vars_unified<A>(&mut self, a: Var<A>, b: Var<A>) -> Unifiability where A: VarWrapper {
         use core::Unifiability::*;
         {
             let mut proxy = StateProxy::new(self);
-            proxy.untyped_unify(a.var, b.var, TypeId::of::<A>());
+            proxy.untyped_unify(a.var, b.var, TypeId::of::<A>(), A::is_recursive());
         }
         let result = if self.proxy_eqs.ok {
             if self.proxy_eqs.is_empty() { AlreadyDone } else { Possible }
@@ -585,7 +586,7 @@ pub enum Unifiability {
 }
 
 impl<'a> VarRetrieve for StateProxy<'a> {
-    fn get_value<A: ToVar>(&self, var: Var<A>) -> Option<&A> {
+    fn get_value<A: VarWrapper>(&self, var: Var<A>) -> Option<&A> {
         self.get_exact_val_opt(var.var)
     }
     fn get_untyped(&self, var: UntypedVar) -> Option<&VarWrapper> {
@@ -595,8 +596,8 @@ impl<'a> VarRetrieve for StateProxy<'a> {
 
 impl<'a> VarStore for StateProxy<'a> {
     fn store_value<A>(&mut self, value: A) -> Var<A>
-    where A : VarWrapper + ToVar + 'static { self.parent.proxy_eqs.store_value(value) }
-    fn make_var<A>(&mut self) -> Var<A> where A : ToVar { self.parent.proxy_eqs.make_var() }
+    where A : VarWrapper + 'static { self.parent.proxy_eqs.store_value(value) }
+    fn make_var<A>(&mut self) -> Var<A> where A : VarWrapper { self.parent.proxy_eqs.make_var() }
 }
 
 impl<'a> FollowRef for StateProxy<'a> {
@@ -610,8 +611,8 @@ impl<'a> FollowRef for StateProxy<'a> {
 
 impl<'a> Unifier for StateProxy<'a> {
     fn unify_vars<A>(&mut self, a: Var<A>, b: Var<A>) -> &mut StateProxy<'a>
-    where A : ToVar {
-        self.untyped_unify(a.var, b.var, TypeId::of::<A>());
+    where A : VarWrapper {
+        self.untyped_unify(a.var, b.var, TypeId::of::<A>(), A::is_recursive());
         self
     }
 
@@ -637,14 +638,14 @@ impl<'a> StateProxy<'a> {
     }
 
     pub unsafe fn overwrite_var<A>(&mut self, var: Var<A>, new_value: A)
-    where A: VarWrapper + ToVar + 'static {
+    where A: VarWrapper + 'static {
         self.parent.proxy_eqs.insert(var.untyped(), Exactly(ExactVal::new(new_value), TypeId::of::<A>()));
     }
 
     ///! Unify two variables.  Inserts an EqualTo if one or both are unset, or calls _equals_ if
     ///! both are set.  If the value is a container, this will recurse and call unify() on the
     ///! contained types; otherwise it simply compares them.
-    fn untyped_unify(&mut self, a: UntypedVar, b: UntypedVar, typeid: TypeId) -> bool {
+    fn untyped_unify(&mut self, a: UntypedVar, b: UntypedVar, typeid: TypeId, use_occurs_check: bool) -> bool {
         if !self.parent.ok() {
             //println!("aborting unification early, not ok");
             return false;
@@ -694,7 +695,7 @@ impl<'a> StateProxy<'a> {
                 return ok;
             },
         };
-        if self.occurs_check_nofollow(eq_dst, eq_src) {
+        if use_occurs_check && self.occurs_check_nofollow(eq_dst, eq_src) {
             self.fail();
             return false;
         }
@@ -714,7 +715,7 @@ impl<'a> StateProxy<'a> {
 
     pub fn get_updated_var(&self, var: UntypedVar) -> UntypedVar { self.follow_id(var) }
 
-    pub fn get_changed_value<A>(&self, a: Var<A>) -> Option<&A> where A : ToVar {
+    pub fn get_changed_value<A>(&self, a: Var<A>) -> Option<&A> where A : VarWrapper {
         let mut id = a.var;
         loop {
             match self.parent.proxy_eqs.get(&id).or_else(|| self.parent.eqs.get(&id)) {
@@ -728,8 +729,8 @@ impl<'a> StateProxy<'a> {
         }
     }
 
-    pub fn are_vars_unified<A>(&mut self, a: Var<A>, b: Var<A>) -> Unifiability where A: ToVar {
-        self.inner_are_vars_unified(a.var, b.var, TypeId::of::<A>())
+    pub fn are_vars_unified<A>(&mut self, a: Var<A>, b: Var<A>) -> Unifiability where A: VarWrapper {
+        self.inner_are_vars_unified(a.var, b.var, TypeId::of::<A>(), A::is_recursive())
     }
 
     pub fn are_vars_unified_untyped(&mut self, a: UntypedVar, b: UntypedVar) -> Unifiability {
@@ -739,13 +740,13 @@ impl<'a> StateProxy<'a> {
         if a_ty != b_ty {
             return Unifiability::Impossible;
         }
-       self.inner_are_vars_unified(a_id, b_id, a_ty)
+       self.inner_are_vars_unified(a_id, b_id, a_ty, true) // TODO use_occurs_check
     }
 
-    fn inner_are_vars_unified(&mut self, a: UntypedVar, b: UntypedVar, ty: TypeId) -> Unifiability {
+    fn inner_are_vars_unified(&mut self, a: UntypedVar, b: UntypedVar, ty: TypeId, use_occurs_check: bool) -> Unifiability {
         use core::Unifiability::*;
         assert!(self.parent.proxy_eqs.is_empty() && self.parent.proxy_eqs.ok);
-        self.untyped_unify(a, b, ty);
+        self.untyped_unify(a, b, ty, use_occurs_check);
         let result = if self.parent.proxy_eqs.ok {
             if self.parent.proxy_eqs.is_empty() { AlreadyDone } else { Possible }
         } else {
@@ -782,13 +783,13 @@ pub type VarCollectionIter<'a> = Box<Iterator<Item=UntypedVar> + 'a>;
 impl VarStore for VarMap {
     ///! Add a variable with a new value to the map.  Called by `make_var_of()`.
     fn store_value<A>(&mut self, value: A) -> Var<A>
-    where A : VarWrapper + ToVar + 'static {
+    where A : VarWrapper + 'static {
         Var::new(self.store_value_untyped(ExactVal::new(value), TypeId::of::<A>()))
     }
 
     ///! Create a new variable with no value.
     fn make_var<A>(&mut self) -> Var<A>
-    where A : ToVar {
+    where A : VarWrapper {
         let var = Exactly(Fresh, TypeId::of::<A>());
         let id = self.incr_id();
         self.eqs.push((id, var));
@@ -904,7 +905,7 @@ impl ConstraintStore {
 }
 
 impl<A> Debug for Var<A>
-where A : ToVar {
+where A : VarWrapper {
     fn fmt(&self, fmt: &mut Formatter) -> ::std::fmt::Result {
         write!(fmt, "Var({})", self.var.0)
     }
