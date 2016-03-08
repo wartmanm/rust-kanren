@@ -1,7 +1,7 @@
 use std::iter::IntoIterator;
 use std::fmt::{Debug, Formatter};
-use std::any::Any;
-use core::{ToVar, VarWrapper, State, StateProxy, Var, VarStore, VarRetrieve, Unifier, UnifyResult, UntypedVar};
+use std::any::{Any, TypeId};
+use core::{ToVar, VarWrapper, State, StateProxy, Var, VarStore, VarRetrieve, Unifier, UnifyResult, UntypedVar, TypedVar, TypeList};
 ///! The end of a singly linked list.
 pub use list::List::Nil; // so you can import list::{Pair, Nil}
 use list::List::Pair as VarPair;
@@ -70,16 +70,22 @@ where A : VarWrapper {
             &Nil => None,
         }
     }
-    fn is_recursive() -> bool where Self: Sized { true }
-    fn occurs_check(&self, state: &StateProxy, other: UntypedVar) -> bool {
+    fn can_contain_type(t: &TypeList, other: TypeId) -> bool {
+        if TypeId::of::<Self>() == other { return true; }
+        if t.contains_type(TypeId::of::<Self>()) { return false; }
+        let new_t = TypeList::Pair(TypeId::of::<Self>(), t);
+        A::can_contain_type(&new_t, other)
+    }
+    fn occurs_check(&self, state: &StateProxy, other: TypedVar) -> bool {
         let mut list = self;
+        let check_heads = A::can_contain_type(&TypeList::Nil, other.type_id());
         loop {
             match list {
                 &Nil => { return false },
                 &VarPair(a, b) => {
-                    if state.occurs_check(other, a.untyped()) { return true; }
+                    if check_heads && state.occurs_check(other, a.untyped()) { return true; }
                     let b = state.get_updated_var(b.untyped());
-                    if b == other { return true; }
+                    if b == other.untyped() { return true; }
                     match state.get_untyped(b) {
                         Some(tail) => { list = tail.get_wrapped_value(); }
                         None => { return false; }

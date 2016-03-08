@@ -1,4 +1,5 @@
-use core::{ToVar, StateProxy, VarWrapper, Var, Unifier, VarStore, UnifyResult, UntypedVar};
+use std::any::TypeId;
+use core::{ToVar, StateProxy, VarWrapper, Var, Unifier, VarStore, UnifyResult, UntypedVar, TypedVar, TypeList};
 use std::rc::Rc;
 use std::marker::PhantomData;
 use list::List;
@@ -116,10 +117,19 @@ macro_rules! tuple_wrapper {
                 Some(Box::new(cast.iter().map(|x| *x)))
             }
 
-            fn occurs_check(&self, state: &StateProxy, other: UntypedVar) -> bool {
+            fn can_contain_type(t: &TypeList, other: TypeId) -> bool {
+                if TypeId::of::<Self>() == other { return true; }
+                if t.contains_type(TypeId::of::<Self>()) { return false; }
+                let new_t = TypeList::Pair(TypeId::of::<Self>(), t);
+                $($param::can_contain_type(&new_t, other) ||)* false
+            }
+
+            fn occurs_check(&self, state: &StateProxy, other: TypedVar) -> bool {
                 let cast: & $equiv = unsafe { ::std::mem::transmute(self) };
-                cast.iter().any(|&x| {
-                    if x == other { true }
+                let can_contain_type = [$($param::can_contain_type(&TypeList::Nil, other.type_id()),)*];
+                cast.iter().zip(can_contain_type.iter()).any(|(&x, &can_contain)| {
+                    if x == other.untyped() { true }
+                    else if !can_contain { false }
                     else { state.occurs_check(other, x) }
                 })
             }
@@ -147,10 +157,17 @@ impl<A> VarWrapper for Option<Var<A>> where A: VarWrapper {
             &None => None,
         }
     }
-    fn occurs_check(&self, state: &StateProxy, other: UntypedVar) -> bool {
+
+    fn can_contain_type(t: &TypeList, other: TypeId) -> bool {
+        if TypeId::of::<Self>() == other { return true; }
+        if t.contains_type(TypeId::of::<Self>()) { return false; }
+        let new_t = TypeList::Pair(TypeId::of::<Self>(), t);
+        A::can_contain_type(&new_t, other)
+    }
+    fn occurs_check(&self, state: &StateProxy, other: TypedVar) -> bool {
         match self {
             &None => false,
-            &Some(a) => state.occurs_check(other, a.untyped()),
+            &Some(a) => A::can_contain_type(&TypeList::Nil, other.type_id()) && state.occurs_check(other, a.untyped())
         }
     }
 }
@@ -179,12 +196,18 @@ impl<A, B> VarWrapper for Result<Var<A>, Var<B>> where A: VarWrapper, B: VarWrap
         };
         Some(Box::new(ref_slice(untyped).iter().cloned()))
     }
-    fn occurs_check(&self, state: &StateProxy, other: UntypedVar) -> bool {
-        let selfvar = match self {
-            &Ok(x) => x.untyped(),
-            &Err(x) => x.untyped(),
+    fn can_contain_type(t: &TypeList, other: TypeId) -> bool {
+        if TypeId::of::<Self>() == other { return true; }
+        if t.contains_type(TypeId::of::<Self>()) { return false; }
+        let new_t = TypeList::Pair(TypeId::of::<Self>(), t);
+        A::can_contain_type(&new_t, other) || B::can_contain_type(&new_t, other)
+    }
+    fn occurs_check(&self, state: &StateProxy, other: TypedVar) -> bool {
+        let (selfvar, can_occur) = match self {
+            &Ok(x) => (x.untyped(), A::can_contain_type(&TypeList::Nil, other.type_id())),
+            &Err(x) => (x.untyped(), B::can_contain_type(&TypeList::Nil, other.type_id())),
         };
-        state.occurs_check(other, selfvar)
+        can_occur && state.occurs_check(other, selfvar)
     }
 }
 

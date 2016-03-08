@@ -2,8 +2,8 @@
 extern crate kanren;
 extern crate ref_slice;
 
-use kanren::core::{State, Unifier, Var, ToVar, VarStore};
-use kanren::core::{VarWrapper, StateProxy, UnifyResult, UntypedVar};
+use kanren::core::{State, Unifier, Var, ToVar, VarStore, TypeList};
+use kanren::core::{VarWrapper, StateProxy, UnifyResult, UntypedVar, TypedVar};
 use kanren::iter::StateIter;
 use kanren::core::vars::__;
 use kanren::core::reify::Reifier;
@@ -16,6 +16,7 @@ use std::fmt::{self, Write, Debug};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::io;
+use std::any::TypeId;
 use ref_slice::ref_slice;
 
 #[derive(Debug, Copy, Clone)]
@@ -253,6 +254,57 @@ impl VarWrapper for Tree {
             },
         }
     }
+    fn can_contain_type(_: &TypeList, other: TypeId) -> bool {
+        return other == TypeId::of::<Tree>()
+            || other == TypeId::of::<List<Tree>>()
+            || other == TypeId::of::<Env>()
+            || other == TypeId::of::<List<&'static str>>()
+    }
+    fn occurs_check(&self, state: &StateProxy, other: TypedVar) -> bool {
+        if !Self::can_contain_type(&TypeList::Nil, other.type_id()) { false }
+        else {
+            match *self {
+                VarSym(_) => false,
+                VarList(list) => {
+                    state.occurs_check(other, list.untyped())
+                },
+                VarFnBody { body, arg, env } => {
+                    state.occurs_check(other, body.untyped())
+                    || state.occurs_check(other, arg.untyped())
+                    || state.occurs_check(other, env.untyped())
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn tree_occurs_check() {
+    let mut s = State::new();
+    fresh!(s, inner_list, outer_list);
+    s.unify(outer_list, TList(list!(Sym("test".to_owned()), inner_list)));
+    println!("inner_list: {:?}, outer_list: {:?}", inner_list, outer_list);
+    println!("state: {:?}", s);
+    s.unify(inner_list, outer_list);
+    assert!(!s.ok());
+}
+
+#[test]
+fn list_occurs_check() {
+    let mut s = State::new();
+    fresh!(s, inner_list, outer_list);
+    s.unify(outer_list, Pair(Sym("test".to_owned()), inner_list));
+    println!("inner_list: {:?}, outer_list: {:?}", inner_list, outer_list);
+    println!("state: {:?}", s);
+    s.unify(inner_list, outer_list);
+    assert!(!s.ok());
+}
+
+#[test]
+fn tree_contains_tree() {
+    assert!(Tree::can_contain_type(&TypeList::Nil, TypeId::of::<Tree>()));
+    assert!(List::<Tree>::can_contain_type(&TypeList::Nil, TypeId::of::<Tree>()));
+    assert!(Tree::can_contain_type(&TypeList::Nil, TypeId::of::<List<Tree>>()));
 }
 
 struct ThreeVarIter {

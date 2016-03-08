@@ -548,3 +548,13 @@ fn occurs_check_test() {
     }
     assert!(!state.ok());
 }
+
+#[test]
+fn occurs_check_2() {
+    let mut state = State::new();
+    fresh!(state, start, end);
+    state.unify(start, Pair(1, Pair(2, Pair(3, end))));
+    assert!(state.ok());
+    state.unify(end, start);
+    assert!(!state.ok());
+}

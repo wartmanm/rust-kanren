@@ -26,6 +26,14 @@ use core::ExactValPtr::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct UntypedVar(usize);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TypedVar(UntypedVar, TypeId);
+
+impl TypedVar {
+    #[inline(always)] pub fn type_id(&self) -> TypeId { self.1 }
+    #[inline(always)] pub fn untyped(&self) -> UntypedVar { self.0 }
+}
+
 ///! Typed wrapper for a usize, used as a unique variable identifier.  Currently they aren't tied
 ///! to a particular state, so the typing, while helpful, isn't sufficient to guarantee safety
 ///! without additional runtime checks.
@@ -215,13 +223,30 @@ pub trait VarWrapper : Debug + 'static + Any + VarWrapperClone {
     ///! disables an optimization that's incorrect in such a case.
     fn uses_overwrite(&self) -> bool { false }
     fn var_iter<'a>(&'a self) -> Option<Box<Iterator<Item=UntypedVar> + 'a>> { None }
-    fn occurs_check(&self, state: &StateProxy, other: UntypedVar) -> bool {
-        match self.var_iter() {
-            Some(mut iter) => iter.any(|x| state.occurs_check(other, x)),
-            None => false
+    fn occurs_check(&self, _: &StateProxy, _: TypedVar) -> bool { false }
+    fn can_contain_type(_: &TypeList, _: TypeId) -> bool where Self: Sized { false }
+}
+
+// needed for VarWrapper::can_contain_type(), to prevent infinite loops
+pub enum TypeList<'a> {
+    Nil,
+    Pair(TypeId, &'a TypeList<'a>),
+}
+
+impl<'a> TypeList<'a> {
+    pub fn contains_type(&self, t: TypeId) -> bool {
+        let mut me = self;
+        while let TypeList::Pair(my_t, ref tail) = *me {
+            if my_t == t { return true; }
+            me = tail;
         }
+        false
     }
-    fn is_recursive() -> bool where Self: Sized { false }
+}
+
+// TODO this can be determined at compile time, can it be made easier for llvm to discover that?
+fn needs_occurs_check<T>() -> bool where T : VarWrapper {
+    T::can_contain_type(&TypeList::Nil, TypeId::of::<T>())
 }
 
 trait FollowRef {
@@ -244,6 +269,11 @@ trait FollowRef {
     ///! and which directly holds a value.
     fn follow_id(&self, id: UntypedVar) -> UntypedVar {
         self.follow_ref(id).0
+    }
+
+    fn follow_typed(&self, id: UntypedVar) -> TypedVar {
+        let (id, _, t) = self.follow_ref(id);
+        TypedVar(id, t)
     }
 
     ///! Follow unlimited levels of indirection to find the value which a variable is equal to.
@@ -334,6 +364,9 @@ where A : VarWrapper {
     pub fn untyped_mut(&mut self) -> &mut UntypedVar {
         &mut self.var
     }
+    pub fn typed(&self) -> TypedVar {
+        TypedVar(self.var, TypeId::of::<A>())
+    }
 }
 
 impl<A> ToVar for Var<A> where A : VarWrapper {
@@ -396,7 +429,7 @@ impl FollowRef for State {
 impl Unifier for State {
     fn unify_vars<A>(&mut self, a: Var<A>, b: Var<A>) -> &mut State
     where A : VarWrapper {
-        self.untyped_unify(a.var, b.var, TypeId::of::<A>(), A::is_recursive());
+        self.untyped_unify(a.var, b.var, TypeId::of::<A>(), needs_occurs_check::<A>());
         self
     }
 
@@ -553,7 +586,7 @@ impl State {
         use core::Unifiability::*;
         {
             let mut proxy = StateProxy::new(self);
-            proxy.untyped_unify(a.var, b.var, TypeId::of::<A>(), A::is_recursive());
+            proxy.untyped_unify(a.var, b.var, TypeId::of::<A>(), needs_occurs_check::<A>());
         }
         let result = if self.proxy_eqs.ok {
             if self.proxy_eqs.is_empty() { AlreadyDone } else { Possible }
@@ -571,7 +604,7 @@ impl State {
         // requires, and VarWrapper::occurs_check can't be generic.
         // This is probably not fixable without finding a better approach for what StateProxy
         // currently does.
-        let elem = self.follow_id(elem);
+        let elem = self.follow_typed(elem);
         let proxy = StateProxy::new(self);
         proxy.occurs_check(elem, list)
     }
@@ -612,7 +645,7 @@ impl<'a> FollowRef for StateProxy<'a> {
 impl<'a> Unifier for StateProxy<'a> {
     fn unify_vars<A>(&mut self, a: Var<A>, b: Var<A>) -> &mut StateProxy<'a>
     where A : VarWrapper {
-        self.untyped_unify(a.var, b.var, TypeId::of::<A>(), A::is_recursive());
+        self.untyped_unify(a.var, b.var, TypeId::of::<A>(), needs_occurs_check::<A>());
         self
     }
 
@@ -695,14 +728,16 @@ impl<'a> StateProxy<'a> {
                 return ok;
             },
         };
-        if use_occurs_check && self.occurs_check_nofollow(eq_dst, eq_src) {
-            self.fail();
-            return false;
-        }
 
         let src_val: VarRef = match src_val {
             ValuePtr(x) => unsafe {
                 let x = &*x;
+
+                if use_occurs_check && self.occurs_check_nofollow(TypedVar(eq_dst, typeid), eq_src, x) {
+                    self.fail();
+                    return false;
+                }
+
                 if x.uses_overwrite() { EqualTo(eq_src) }
                 else { Exactly(Value(x.clone_boxed()), typeid) }
             },
@@ -730,7 +765,7 @@ impl<'a> StateProxy<'a> {
     }
 
     pub fn are_vars_unified<A>(&mut self, a: Var<A>, b: Var<A>) -> Unifiability where A: VarWrapper {
-        self.inner_are_vars_unified(a.var, b.var, TypeId::of::<A>(), A::is_recursive())
+        self.inner_are_vars_unified(a.var, b.var, TypeId::of::<A>(), needs_occurs_check::<A>())
     }
 
     pub fn are_vars_unified_untyped(&mut self, a: UntypedVar, b: UntypedVar) -> Unifiability {
@@ -760,20 +795,29 @@ impl<'a> StateProxy<'a> {
         //self.get_exact_val(var).opt().map(|x| x.var_iter(self))
     //}
 
-    #[inline(always)]
-    pub fn occurs_check(&self, elem: UntypedVar, list: UntypedVar) -> bool {
-        let list = self.follow_id(list);
-        self.occurs_check_nofollow(elem, list)
+    pub fn occurs_check_typed<A>(&self, elem: TypedVar, list: Var<A>) -> bool
+    where A : VarWrapper {
+        let (list, listval, _) = self.follow_ref(list.untyped());
+        match listval.opt() {
+            Some(listval) => self.occurs_check_nofollow(elem, list, listval),
+            None => list == elem.untyped(),
+        }
     }
 
-    fn occurs_check_nofollow(&self, elem: UntypedVar, list: UntypedVar) -> bool {
-        if elem == list {
+    #[inline(always)]
+    pub fn occurs_check(&self, elem: TypedVar, list: UntypedVar) -> bool {
+        let (list, listval, _) = self.follow_ref(list);
+        match listval.opt() {
+            Some(listval) => self.occurs_check_nofollow(elem, list, listval),
+            None => list == elem.untyped(),
+        }
+    }
+
+    fn occurs_check_nofollow(&self, elem: TypedVar, list: UntypedVar, listvar: &VarWrapper) -> bool {
+        if elem.untyped() == list {
             true
         } else {
-            match self.get_untyped(list) {
-                Some(listvar) => listvar.occurs_check(self, elem),
-                None => false,
-            }
+            listvar.occurs_check(self, elem)
         }
     }
 }
