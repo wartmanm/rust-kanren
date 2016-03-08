@@ -1,4 +1,4 @@
-use core::{ToVar, State, Var, Unifier, VarRetrieve, VarWrapper};
+use core::{ToVar, State, Var, Unifier, VarRetrieve, VarWrapper, StateInner};
 use std::rc::Rc;
 use std::marker::PhantomData;
 use std::any::*;
@@ -202,7 +202,7 @@ pub type StateIter = TailIterResult;
 struct StateFnIter<F>
 where F: Fn(usize, State) -> StateIter + 'static {
     f: F,
-    state: Rc<State>,
+    state: Rc<StateInner>,
     len: usize,
     pos: usize,
 }
@@ -230,7 +230,7 @@ where F: Fn(usize, State) -> StateIter + 'static {
     pub fn conde(self, state: State) -> StateIter {
         if !state.ok() { return TailIterResult(None, None); }
         let chain = VecDeque::with_capacity(self.len);
-        let iter = StateFnIter { f: self.f, state: Rc::new(state), len: self.len, pos: 0 };
+        let iter = StateFnIter { f: self.f, state: Rc::new(state.unwrap()), len: self.len, pos: 0 };
         TailIterResult(None, Some(Box::new(ChainManyIter { iter: Some(Box::new(iter)), chain: chain })))
     }
 
@@ -244,7 +244,7 @@ where F: Fn(usize, State) -> StateIter + 'static {
 
     fn condau(self, state: State, return_more: bool) -> StateIter {
         if !state.ok() { return TailIterResult(None, None); }
-        let iter = StateFnIter { f: self.f, state: Rc::new(state), len: self.len, pos: 0 };
+        let iter = StateFnIter { f: self.f, state: Rc::new(state.unwrap()), len: self.len, pos: 0 };
         TailIterResult(None, Some(Box::new(CondaIter { iter: Box::new(iter), return_more: return_more })))
     }
 }
@@ -303,14 +303,14 @@ impl StateIterExt for StateIter {
 ///! Helper to find all results for a given state and iterator.
 pub struct FindAll<F>
 where F: Fn(State) -> StateIter + 'static {
-    state: Rc<State>,
+    state: Rc<StateInner>,
     f: F,
 }
 
 impl<F> FindAll<F>
 where F: Fn(State) -> StateIter + 'static {
     pub fn new(state: State, f: F) -> FindAll<F> {
-        let state = Rc::new(state);
+        let state = Rc::new(state.unwrap());
         FindAll { state: state, f: f }
     }
     
@@ -324,7 +324,9 @@ where F: Fn(State) -> StateIter + 'static {
 
     ///! Retrieve the wrapped state, destroying the FindAll.
     pub fn state(self) -> State {
-        Rc::try_unwrap(self.state).unwrap_or_else(|state| State::with_parent(state.clone()))
+        Rc::try_unwrap(self.state)
+            .map(State::from_inner)
+            .unwrap_or_else(|state| State::with_parent(state.clone()))
     }
 }
 
@@ -361,7 +363,7 @@ where F: Fn(State) -> StateIter + 'static,
 
     let mut list = state.make_var_of(list);
     let var = state.make_var_of(var);
-    let state = Rc::new(state);
+    let state = Rc::new(state.unwrap());
     let mut return_state = State::with_parent(state.clone());
     let findall_state = State::with_parent(state);
     for state in FindAll::new(findall_state, state_fn).iter() {

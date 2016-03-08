@@ -3,7 +3,7 @@ use std::cmp::Ordering::*;
 use std::collections::{BTreeSet, HashMap};
 use std::collections::hash_map::Entry::*;
 use std::rc::Rc;
-use core::{UntypedVar, State, FollowRef, VarWrapper, Unifier};
+use core::{UntypedVar, State, FollowRef, VarWrapper, Unifier, StateInner};
 use core::ExactVarRef::*;
 use iter::{StateIter, single, TailIter};
 
@@ -25,7 +25,7 @@ impl PartialOrd for CountedVar {
 
 type VarWrapperIter = Box<Iterator<Item=Box<VarWrapper>>>;
 
-fn value_iter(state: Rc<State>, var: UntypedVar, mut iter: VarWrapperIter) -> TailIter {
+fn value_iter(state: Rc<StateInner>, var: UntypedVar, mut iter: VarWrapperIter) -> TailIter {
     use iter::{TailIterResult, wrap_fn};
     wrap_fn(move || {
         while let Some(x) = iter.next() {
@@ -40,18 +40,18 @@ fn value_iter(state: Rc<State>, var: UntypedVar, mut iter: VarWrapperIter) -> Ta
 }
 
 struct ParentStateIter<'a> {
-    state: Option<&'a State>,
+    state: Option<&'a StateInner>,
 }
 
 impl<'a> ParentStateIter<'a> {
     fn new(state: &'a State) -> ParentStateIter {
-        ParentStateIter { state: Some(state) }
+        ParentStateIter { state: Some(&**state) }
     }
 }
 
 impl<'a> Iterator for ParentStateIter<'a> {
-    type Item = &'a State;
-    fn next(&mut self) -> Option<&'a State> {
+    type Item = &'a StateInner;
+    fn next(&mut self) -> Option<&'a StateInner> {
         let result = self.state;
         self.state = self.state.and_then(|s| {
             s.parent.as_ref().map(|x| &**x)
@@ -137,7 +137,7 @@ fn assign_values_inner(state: State, mut counted: BTreeSet<CountedVar>, mut vars
         Some(x) => x,
         None => { return assign_values_inner(state, counted, vars); },
     };
-    let iter = TailIterResult(None, Some(value_iter(Rc::new(state), var.0, val)));
+    let iter = TailIterResult(None, Some(value_iter(Rc::new(state.unwrap()), var.0, val)));
     
     iter
     .and(move |state| {

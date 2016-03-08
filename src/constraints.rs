@@ -1,5 +1,6 @@
 use std::ops::{Add, Sub};
-use core::{ToVar, ToConstraint, Constraint, Var, StateProxy, State, ConstraintResult, VarStore, Unifier, VarRetrieve, VarMap, UntypedVar, VarWrapper};
+use core::{ToVar, ToConstraint, Constraint, Var, StateProxy, ConstraintResult, VarStore, Unifier, VarRetrieve, VarMap, UntypedVar, VarWrapper};
+use core::StateInner as State;
 use core::ConstraintResult::*;
 use finitedomain::Fd;
 use finitedomain::Fd::*;

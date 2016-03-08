@@ -445,7 +445,7 @@ fn repl(mut state: State) {
                 fresh!(state, result);
                 //let path = state.make_var_of(Nil);
                 //let newpath = state.make_var();
-                let rcstate = Rc::new(state);
+                let rcstate = Rc::new(state.unwrap());
                 let tmpstate = State::with_parent(rcstate.clone());
                 let mut iter = eval(tmpstate, x, env, result);
                 if let Some(new_state) = iter.into_iter().next() {

@@ -17,11 +17,51 @@ use std::any::*;
 use std::raw::TraitObject;
 use std::collections::HashSet;
 use std::mem;
+use std::ops::{Deref, DerefMut};
 
 //use core::ExactVal::*;
 //use core::VarRef::*;
 use core::ExactVarRef::*;
 
+#[derive(Debug)]
+pub struct State(Box<StateInner>);
+
+impl Deref for State {
+    type Target = StateInner;
+    fn deref(&self) -> &StateInner { &self.0 }
+}
+impl DerefMut for State {
+    fn deref_mut(&mut self) -> &mut StateInner { &mut self.0 }
+}
+impl State {
+    pub fn new() -> State {
+        State(Box::new(StateInner::new()))
+    }
+    pub fn with_parent(parent: Rc<StateInner>) -> State {
+        State(Box::new(StateInner::with_parent(parent)))
+    }
+    pub fn from_inner(state: StateInner) -> State {
+        State(Box::new(state))
+    }
+    pub fn unwrap(self) -> StateInner {
+        let state: StateInner = *(self.0);
+        state
+    }
+}
+impl VarStore for State {
+    fn store_value<A>(&mut self, value: A) -> Var<A>
+    where A : VarWrapper + 'static { self.0.store_value(value) }
+    fn make_var<A>(&mut self) -> Var<A> where A : VarWrapper { self.0.make_var() }
+}
+impl VarRetrieve for State {
+    fn get_value<A>(&self, a: Var<A>) -> Option<&A> where A : VarWrapper { self.0.get_value(a) }
+    fn get_untyped(&self, var: UntypedVar) -> Option<&VarWrapper> { self.0.get_untyped(var) }
+}
+impl Unifier for State {
+    fn unify_vars<A>(&mut self, a: Var<A>, b: Var<A>) -> &mut Self where A : VarWrapper { self.0.unify_vars(a, b); self }
+    fn fail(&mut self) -> &mut Self { self.0.fail(); self }
+    fn ok(&self) -> bool { self.0.ok() }
+}
 
 ///! Wrapper for a usize, used as a unique variable identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -42,13 +82,13 @@ pub struct Var<A: VarWrapper> { var: UntypedVar, var_type: PhantomData<A> }
 impl<A> Clone for Var<A> where A: VarWrapper { fn clone(&self) -> Var<A> { *self } }
 impl<A> Copy for Var<A> where A: VarWrapper { }
 
-///! State is the heart of rust_kanren.  It tracks all variable substitutions added by calling
+///! StateInner is the heart of rust_kanren.  It tracks all variable substitutions added by calling
 ///! `unify()`, hands out Vars through `make_var()` and `make_var_of()`, and tracks whether any
 ///! unifications have failed.
-pub struct State {
+pub struct StateInner {
     eqs: VarMap,
     // TODO: use a reference instead
-    parent: Option<Rc<State>>,
+    parent: Option<Rc<StateInner>>,
     constraints: ConstraintStore,
     proxy_eqs: VarMap,
 }
@@ -57,7 +97,7 @@ pub struct State {
 ///! unification, which is necessary for constraints.
 #[derive(Debug)]
 pub struct StateProxy<'a> {
-    parent: &'a mut State,
+    parent: &'a mut StateInner,
 }
 
 ///! Enum representing the possible outcomes of `Constraint::update()`.
@@ -85,22 +125,22 @@ pub trait Constraint: Debug + Sized {
     fn relevant(&self, _: &VarMap) -> bool;
     ///! Called to update a constraint's variables when unification has assigned them to be equal
     ///! to other variables.  Should call `state.update_var()` for each variable in the constraint.
-    fn update_vars(&mut self, _: &State);
+    fn update_vars(&mut self, _: &StateInner);
     ///! (Optional) Called to determine whether `update_vars()` needs to be called.  Should call
     ///! `varmap.need_update()` for each variable in the constraint.
     fn need_update(&self, vars: &VarMap) -> bool { self.relevant(vars) }
 }
 
-///! Trait for creating a `Constraint`, given a `State`.
+///! Trait for creating a `Constraint`, given a `StateInner`.
 pub trait ToConstraint {
     type ConstraintType: Constraint + 'static + Clone;
-    fn into_constraint(self, state: &mut State) -> Self::ConstraintType;
+    fn into_constraint(self, state: &mut StateInner) -> Self::ConstraintType;
 }
 
 trait BoxedConstraint: Debug {
     fn update(&self, _: &mut StateProxy) -> ConstraintResult<Box<BoxedConstraint>>;
     fn relevant(&self, _: &VarMap) -> bool;
-    fn update_vars(&mut self, _: &State);
+    fn update_vars(&mut self, _: &StateInner);
     fn need_update(&self, vars: &VarMap) -> bool;
     fn clone_boxed(&self) -> Box<BoxedConstraint>;
 }
@@ -120,7 +160,7 @@ impl<A> BoxedConstraint for ConstraintWrapper<A> where A : Constraint + Clone + 
         }
     }
     fn relevant(&self, vars: &VarMap) -> bool { self.0.relevant(vars) }
-    fn update_vars(&mut self, vars: &State) { self.0.update_vars(vars) }
+    fn update_vars(&mut self, vars: &StateInner) { self.0.update_vars(vars) }
     fn need_update(&self, vars: &VarMap) -> bool { self.0.need_update(vars) }
     fn clone_boxed(&self) -> Box<BoxedConstraint> {
         Box::new(ConstraintWrapper(self.0.clone()))
@@ -421,7 +461,7 @@ impl ExactVal {
     //}
 }
 
-impl VarRetrieve for State {
+impl VarRetrieve for StateInner {
     fn get_value<A: VarWrapper>(&self, var: Var<A>) -> Option<&A> {
         self.get_exact_val_opt(var.var)
     }
@@ -430,13 +470,13 @@ impl VarRetrieve for State {
     }
 }
 
-impl VarStore for State {
+impl VarStore for StateInner {
     fn store_value<A>(&mut self, value: A) -> Var<A>
     where A : VarWrapper + 'static { self.eqs.store_value(value) }
     fn make_var<A>(&mut self) -> Var<A> where A : VarWrapper { self.eqs.make_var() }
 }
 
-impl FollowRef for State {
+impl FollowRef for StateInner {
     fn get_ref(&self, id: UntypedVar) -> &VarRef {
         let mut state = self;
         loop {
@@ -453,14 +493,14 @@ impl FollowRef for State {
     }
 }
 
-impl Unifier for State {
-    fn unify_vars<A>(&mut self, a: Var<A>, b: Var<A>) -> &mut State
+impl Unifier for StateInner {
+    fn unify_vars<A>(&mut self, a: Var<A>, b: Var<A>) -> &mut StateInner
     where A : VarWrapper {
         self.untyped_unify(a.var, b.var, TypeId::of::<A>(), needs_occurs_check::<A>());
         self
     }
 
-    fn fail(&mut self) -> &mut State {
+    fn fail(&mut self) -> &mut StateInner {
         self.eqs.ok = false;
         self
     }
@@ -470,11 +510,11 @@ impl Unifier for State {
     }
 }
 
-impl State {
+impl StateInner {
 
-    ///! Create a State with no substitutions and no parent.
-    pub fn new() -> State {
-        State {
+    ///! Create a StateInner with no substitutions and no parent.
+    pub fn new() -> StateInner {
+        StateInner {
             eqs: VarMap::new(),
             parent: None,
             constraints: ConstraintStore::new(),
@@ -482,11 +522,11 @@ impl State {
         }
     }
 
-    ///! Create a State which builds on a parent State.  This is essential for backtracking: no
-    ///! steps are needed to return to an earlier point beyond dropping the child State.
-    pub fn with_parent(parent: Rc<State>) -> State {
+    ///! Create a StateInner which builds on a parent StateInner.  This is essential for backtracking: no
+    ///! steps are needed to return to an earlier point beyond dropping the child StateInner.
+    pub fn with_parent(parent: Rc<StateInner>) -> StateInner {
         let constraints = parent.constraints.clone();
-        State {
+        StateInner {
             eqs: VarMap::with_parent(&parent.eqs),
             parent: Some(parent.clone()),
             constraints: constraints,
@@ -637,7 +677,7 @@ impl State {
     }
 }
 
-///! Return type for `State::are_vars_unified`.
+///! Return type for `StateInner::are_vars_unified`.
 #[derive(Eq, PartialEq, Copy, Clone)]
 pub enum Unifiability {
     Impossible,
@@ -687,7 +727,7 @@ impl<'a> Unifier for StateProxy<'a> {
 }
 
 impl<'a> StateProxy<'a> {
-    fn new(parent: &'a mut State) -> StateProxy<'a> {
+    fn new(parent: &'a mut StateInner) -> StateProxy<'a> {
         parent.proxy_eqs.id = parent.eqs.id;
         parent.proxy_eqs.ok = parent.eqs.ok;
         StateProxy { parent: parent }
@@ -987,10 +1027,10 @@ where A : VarWrapper {
         write!(fmt, "Var({})", self.var.0)
     }
 }
-impl Debug for State {
+impl Debug for StateInner {
     fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
 
-        fn debug_var_ref(me: &State, val: &VarRef, fmt: &mut Formatter) -> fmt::Result {
+        fn debug_var_ref(me: &StateInner, val: &VarRef, fmt: &mut Formatter) -> fmt::Result {
             match val.split() {
                 Err(x) => write!(fmt, "EqualTo({:?})", x),
                 Ok(x) => {
@@ -1006,7 +1046,7 @@ impl Debug for State {
             }
         }
 
-        try!(writeln!(fmt, "State {{"));
+        try!(writeln!(fmt, "StateInner {{"));
         try!(writeln!(fmt, "\tid: {:?}", self.eqs.id));
         try!(writeln!(fmt, "\tok: {:?}", self.eqs.ok));
         try!(writeln!(fmt, "\tproxy.id: {:?}", self.proxy_eqs.id));

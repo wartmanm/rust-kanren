@@ -1,6 +1,6 @@
 use finitedomain::Fd::*;
 use std::collections::HashSet;
-use core::{VarWrapper, StateProxy, Var, ToVar, VarStore, VarRetrieve, State, Unifier, UnifyResult};
+use core::{VarWrapper, StateProxy, Var, ToVar, VarStore, VarRetrieve, State, Unifier, UnifyResult, StateInner};
 use iter::{StateIter, single};
 use std::rc::Rc;
 use iter::{TailIter, TailIterResult};
@@ -195,12 +195,12 @@ where A: ToVar<VarType=Fd>, B: ToVar<VarType=usize> {
         None => { single(state) },
         Some(Values(values)) => {
             let valiter = values.into_iter();
-            TailIterResult(None, Some(fd_value_iter(Rc::new(state), fd, valiter, u)))
+            TailIterResult(None, Some(fd_value_iter(Rc::new(state.unwrap()), fd, valiter, u)))
         }
     }
 }
 
-fn fd_value_iter(state: Rc<State>, fd: Var<Fd>, mut vals: ::std::vec::IntoIter<usize>, u: Var<usize>) -> TailIter {
+fn fd_value_iter(state: Rc<StateInner>, fd: Var<Fd>, mut vals: ::std::vec::IntoIter<usize>, u: Var<usize>) -> TailIter {
     use iter::wrap_fn;
     wrap_fn(move || {
         while let Some(x) = vals.next() {

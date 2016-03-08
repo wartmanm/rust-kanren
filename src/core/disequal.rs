@@ -1,6 +1,7 @@
 use std::any::TypeId;
 use std::fmt::{self, Debug, Formatter};
-use core::{ConstraintResult, StateProxy, UntypedVar, Constraint, State, Var, ToVar, FollowRef, Unifier, VarMap, VarWrapper};
+use core::{ConstraintResult, StateProxy, UntypedVar, Constraint, Var, ToVar, FollowRef, Unifier, VarMap, VarWrapper};
+use core::StateInner as State;
 use core::ConstraintResult::*;
 use core::ExactVarRef::*;
 

@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate kanren;
 
-use kanren::core::{State, Var, Unifier, VarStore, VarRetrieve, VarMap};
+use kanren::core::{State, Var, Unifier, VarStore, VarRetrieve, VarMap, StateInner};
 use kanren::core::vars::__;
 use kanren::core::assign_all_values;
 use kanren::finitedomain::{Fd, fd_values};
@@ -323,13 +323,13 @@ impl Debug for ConstraintFn {
 
 impl ToConstraint for ConstraintFn {
     type ConstraintType = ConstraintFn;
-    fn into_constraint(self, _: &mut State) -> ConstraintFn { self }
+    fn into_constraint(self, _: &mut StateInner) -> ConstraintFn { self }
 }
 
 impl Constraint for ConstraintFn {
     fn update(&self, proxy: &mut StateProxy) -> ConstraintResult<ConstraintFn> { (self.f)(proxy) }
     fn relevant(&self, _: &VarMap) -> bool { true }
-    fn update_vars(&mut self, vars: &State) {
+    fn update_vars(&mut self, vars: &StateInner) {
         for var in self.vars.iter_mut() {
             vars.update_var(var)
         }
